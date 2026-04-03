@@ -1,17 +1,22 @@
+import { z } from "zod";
 import { BaseAgent } from "../core/baseAgent";
 import { callLLM } from "../core/llmClient";
-import fs from "fs";
-import path from "path";
+import { PRReview } from "../core/types";
+import { loadPrompt } from "../helpers/loadPrompt";
 
-export class PRAgent extends BaseAgent {
-  async run(input: string) {
-    const promptPath = path.resolve(__dirname, "../../prompts/prPrompt.md");
-    const promptTemplate = fs.readFileSync(promptPath, "utf-8");
+const prReviewSchema = z.object({
+  summary: z.string(),
+  impacts: z.array(z.string()),
+  risks: z.array(z.string()),
+  suggestions: z.array(z.string()),
+  testRecommendations: z.array(z.string())
+});
 
-    const finalPrompt = `${promptTemplate}\n\nCode Changes:\n${input}`;
-
+export class PRAgent extends BaseAgent<PRReview> {
+  async run(input: string): Promise<PRReview> {
+    const promptTemplate = loadPrompt("prPrompt");
+    const finalPrompt = `${promptTemplate}\n\nCode changes:\n${input}`;
     const response = await callLLM(finalPrompt);
-
-    return this.parseResponse(response);
+    return this.parseResponse(response, prReviewSchema);
   }
 }

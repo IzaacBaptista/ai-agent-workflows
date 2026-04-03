@@ -1,3 +1,7 @@
+export type WorkflowResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string };
+
 export interface IssueAnalysis {
   summary: string;
   questions: string[];
@@ -16,7 +20,7 @@ export interface BugAnalysis {
   risks: string[];
 }
 
-export interface PRAnalysis {
+export interface PRReview {
   summary: string;
   impacts: string[];
   risks: string[];
