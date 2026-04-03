@@ -7,3 +7,19 @@ export interface IssueAnalysis {
   risks: string[];
   assumptions: string[];
 }
+
+export interface BugAnalysis {
+  summary: string;
+  possibleCauses: string[];
+  investigationSteps: string[];
+  fixSuggestions: string[];
+  risks: string[];
+}
+
+export interface PRAnalysis {
+  summary: string;
+  impacts: string[];
+  risks: string[];
+  suggestions: string[];
+  testRecommendations: string[];
+}
