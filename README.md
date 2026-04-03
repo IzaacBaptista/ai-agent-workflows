@@ -106,7 +106,9 @@ src/
 ├── agents/               # IssueAgent, BugAgent, PRAgent
 ├── core/                 # BaseAgent, LLM client, shared types
 ├── config/               # Environment variable loading
-├── helpers/              # loadPrompt utility
+├── helpers/              # loadPrompt, buildGitHubPRReviewInput, fetchGitHubPR, formatPRReviewComment
+├── integrations/
+│   └── github/           # postPRComment (GitHub REST API write operations)
 ├── memory/               # Simple in-memory key-value store
 ├── tools/                # Logging, external API, code search
 └── workflows/            # runIssueWorkflow, runBugWorkflow, runPRReviewWorkflow
@@ -202,6 +204,59 @@ curl -X POST http://localhost:3000/github/pr-review \
 {
   "success": true,
   "data": { "summary": "...", "risks": ["..."], ... }
+}
+```
+
+#### POST `/github/pr-review/fetch`
+
+Fetches the PR data directly from the GitHub API and runs the review workflow. A `githubToken` is optional but recommended to avoid rate limiting.
+
+```bash
+curl -X POST http://localhost:3000/github/pr-review/fetch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repository": "IzaacBaptista/ai-agent-workflows",
+    "prNumber": 4,
+    "githubToken": "ghp_..."
+  }'
+```
+
+```json
+{
+  "success": true,
+  "data": { "summary": "...", "risks": ["..."], ... }
+}
+```
+
+#### POST `/github/pr-review/comment`
+
+Fetches the PR from GitHub, runs the AI review, and posts the result as a comment directly on the pull request. A `githubToken` with write access is required.
+
+```bash
+curl -X POST http://localhost:3000/github/pr-review/comment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repository": "IzaacBaptista/ai-agent-workflows",
+    "prNumber": 4,
+    "githubToken": "ghp_..."
+  }'
+```
+
+```json
+{
+  "success": true,
+  "data": { "summary": "...", "risks": ["..."], ... },
+  "meta": { "commentPosted": true }
+}
+```
+
+If the review succeeds but posting the comment fails (e.g. invalid token or insufficient permissions), the analysis is still returned with `meta.commentPosted` set to `false`:
+
+```json
+{
+  "success": true,
+  "data": { "summary": "...", "risks": ["..."], ... },
+  "meta": { "commentPosted": false, "commentError": "Request failed with status code 403" }
 }
 ```
 

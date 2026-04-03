@@ -5,6 +5,8 @@ import { runBugWorkflow } from "./workflows/bugWorkflow";
 import { runPRReviewWorkflow } from "./workflows/prReviewWorkflow";
 import { buildGitHubPRReviewInput } from "./helpers/buildGitHubPRReviewInput";
 import { fetchGitHubPR } from "./helpers/fetchGitHubPR";
+import { formatPRReviewComment } from "./helpers/formatPRReviewComment";
+import { postPRComment } from "./integrations/github/postPRComment";
 
 const app = express();
 
@@ -105,6 +107,44 @@ app.post("/github/pr-review/fetch", async (req: Request, res: Response, next: Ne
     const input = buildGitHubPRReviewInput(prDetails);
     const data = await runPRReviewWorkflow(input);
     res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GitHub PR review with automatic fetching and comment posted back to GitHub
+const githubPRCommentSchema = z.object({
+  repository: z.string().min(1),
+  prNumber: z.number(),
+  githubToken: z.string().min(1),
+});
+
+app.post("/github/pr-review/comment", async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = githubPRCommentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: "Invalid request body" });
+    return;
+  }
+  try {
+    const { repository, prNumber, githubToken } = parsed.data;
+    const prDetails = await fetchGitHubPR(repository, prNumber, githubToken);
+    const input = buildGitHubPRReviewInput(prDetails);
+    const result = await runPRReviewWorkflow(input);
+    if (!result.success) {
+      res.status(500).json(result);
+      return;
+    }
+    let commentPosted = false;
+    let commentError: string | undefined;
+    try {
+      const comment = formatPRReviewComment(result.data);
+      await postPRComment(repository, prNumber, comment, githubToken);
+      commentPosted = true;
+    } catch (err) {
+      commentError = err instanceof Error ? err.message : String(err);
+      console.error("[github/pr-review/comment] Failed to post comment:", commentError);
+    }
+    res.json({ success: true, data: result.data, meta: { commentPosted, commentError } });
   } catch (err) {
     next(err);
   }
