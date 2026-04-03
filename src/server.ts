@@ -134,9 +134,17 @@ app.post("/github/pr-review/comment", async (req: Request, res: Response, next: 
       res.status(500).json(result);
       return;
     }
-    const comment = formatPRReviewComment(result.data);
-    await postPRComment(repository, prNumber, comment, githubToken);
-    res.json({ success: true, data: result.data, commented: true });
+    let commentPosted = false;
+    let commentError: string | undefined;
+    try {
+      const comment = formatPRReviewComment(result.data);
+      await postPRComment(repository, prNumber, comment, githubToken);
+      commentPosted = true;
+    } catch (err) {
+      commentError = err instanceof Error ? err.message : String(err);
+      console.error("[github/pr-review/comment] Failed to post comment:", commentError);
+    }
+    res.json({ success: true, data: result.data, meta: { commentPosted, commentError } });
   } catch (err) {
     next(err);
   }
