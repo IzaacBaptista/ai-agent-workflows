@@ -1,26 +1,58 @@
-import axios from "axios";
-import * as dotenv from "dotenv";
+import { runIssueWorkflow } from "./workflows/issueWorkflow";
+import { runBugWorkflow } from "./workflows/bugWorkflow";
+import { runPRReviewWorkflow } from "./workflows/prReviewWorkflow";
 
-dotenv.config();
+function printUsage(): void {
+  console.log(`
+Usage: npm run dev -- <command> "<input text>"
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+Commands:
+  issue   Analyse a product or engineering issue
+  bug     Diagnose a bug and suggest fixes
+  pr      Review a pull request description
 
-async function runAgent() {
-  const response = await axios.post(
-    "https://api.openai.com/v1/responses",
-    {
-      model: "gpt-5",
-      input: "Transform this issue into a technical plan: User cannot login after password reset"
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      }
-    }
-  );
-
-  console.log(response.data);
+Examples:
+  npm run dev -- issue "User cannot login after password reset"
+  npm run dev -- bug "500 error when creating order with coupon"
+  npm run dev -- pr "Refactored auth middleware and updated token validation"
+`);
 }
 
-runAgent();
+async function main(): Promise<void> {
+  const [, , command, ...rest] = process.argv;
+  const input = rest.join(" ").trim();
+
+  const validCommands = ["issue", "bug", "pr"];
+
+  if (!command || !validCommands.includes(command)) {
+    console.error(`Error: Unknown or missing command "${command ?? ""}".`);
+    printUsage();
+    process.exit(1);
+  }
+
+  if (!input) {
+    console.error(`Error: No input text provided for command "${command}".`);
+    printUsage();
+    process.exit(1);
+  }
+
+  try {
+    let result;
+
+    if (command === "issue") {
+      result = await runIssueWorkflow(input);
+    } else if (command === "bug") {
+      result = await runBugWorkflow(input);
+    } else {
+      result = await runPRReviewWorkflow(input);
+    }
+
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Error: ${message}`);
+    process.exit(1);
+  }
+}
+
+main();
