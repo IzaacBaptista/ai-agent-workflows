@@ -3,6 +3,7 @@ import { z } from "zod";
 import { runIssueWorkflow } from "./workflows/issueWorkflow";
 import { runBugWorkflow } from "./workflows/bugWorkflow";
 import { runPRReviewWorkflow } from "./workflows/prReviewWorkflow";
+import { buildGitHubPRReviewInput } from "./helpers/buildGitHubPRReviewInput";
 
 const app = express();
 
@@ -54,6 +55,30 @@ app.post("/pr/review", async (req: Request, res: Response, next: NextFunction) =
   }
   try {
     const data = await runPRReviewWorkflow(parsed.data.input);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GitHub PR review
+const githubPRReviewSchema = z.object({
+  repository: z.string().min(1),
+  prNumber: z.number(),
+  title: z.string().min(1),
+  description: z.string(),
+  diff: z.string(),
+});
+
+app.post("/github/pr-review", async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = githubPRReviewSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: "Invalid request body" });
+    return;
+  }
+  try {
+    const input = buildGitHubPRReviewInput(parsed.data);
+    const data = await runPRReviewWorkflow(input);
     res.json({ success: true, data });
   } catch (err) {
     next(err);

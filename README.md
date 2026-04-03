@@ -182,6 +182,29 @@ curl -X POST http://localhost:3000/pr/review \
 }
 ```
 
+#### POST `/github/pr-review`
+
+Accepts a structured GitHub PR payload and runs the same PR review workflow.
+
+```bash
+curl -X POST http://localhost:3000/github/pr-review \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repository":"IzaacBaptista/ai-agent-workflows",
+    "prNumber":4,
+    "title":"Refactor auth middleware",
+    "description":"Updated token validation and request guards",
+    "diff":"--- a/src/middleware/auth.ts\n+++ b/src/middleware/auth.ts\n@@ -12,7 +12,7 @@ export function authMiddleware(req, res, next) {\n-  if (!token) return res.status(401).send();\n+  if (!token) return res.status(401).json({ error: \"Unauthorized\" });\n   validateToken(token, next);\n }"
+  }'
+```
+
+```json
+{
+  "success": true,
+  "data": { "summary": "...", "risks": ["..."], ... }
+}
+```
+
 ### Error responses
 
 **400 – Invalid request body**
