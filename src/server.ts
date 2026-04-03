@@ -4,6 +4,7 @@ import { runIssueWorkflow } from "./workflows/issueWorkflow";
 import { runBugWorkflow } from "./workflows/bugWorkflow";
 import { runPRReviewWorkflow } from "./workflows/prReviewWorkflow";
 import { buildGitHubPRReviewInput } from "./helpers/buildGitHubPRReviewInput";
+import { fetchGitHubPR } from "./helpers/fetchGitHubPR";
 
 const app = express();
 
@@ -78,6 +79,30 @@ app.post("/github/pr-review", async (req: Request, res: Response, next: NextFunc
   }
   try {
     const input = buildGitHubPRReviewInput(parsed.data);
+    const data = await runPRReviewWorkflow(input);
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GitHub PR review with automatic fetching from GitHub API
+const githubPRFetchSchema = z.object({
+  repository: z.string().min(1),
+  prNumber: z.number(),
+  githubToken: z.string().optional(),
+});
+
+app.post("/github/pr-review/fetch", async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = githubPRFetchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: "Invalid request body" });
+    return;
+  }
+  try {
+    const { repository, prNumber, githubToken } = parsed.data;
+    const prDetails = await fetchGitHubPR(repository, prNumber, githubToken);
+    const input = buildGitHubPRReviewInput(prDetails);
     const data = await runPRReviewWorkflow(input);
     res.json({ success: true, data });
   } catch (err) {
