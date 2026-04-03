@@ -113,11 +113,96 @@ src/
 prompts/                  # Markdown prompt templates per workflow
 ```
 
+## HTTP API
+
+The same workflows are also available as an HTTP API built with Express.
+
+### Starting the API server
+
+```bash
+npm run dev:api
+```
+
+The server starts on **port 3000** by default (override with the `PORT` environment variable).
+
+### Endpoints
+
+#### GET `/health`
+
+```bash
+curl http://localhost:3000/health
+```
+
+```json
+{ "ok": true }
+```
+
+#### POST `/issue/analyze`
+
+```bash
+curl -X POST http://localhost:3000/issue/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"input":"User cannot login after password reset"}'
+```
+
+```json
+{
+  "success": true,
+  "data": { "summary": "...", "technicalPlan": ["..."], ... }
+}
+```
+
+#### POST `/bug/analyze`
+
+```bash
+curl -X POST http://localhost:3000/bug/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"input":"500 error when creating order with coupon"}'
+```
+
+```json
+{
+  "success": true,
+  "data": { "diagnosis": "...", "possibleCauses": ["..."], ... }
+}
+```
+
+#### POST `/pr/review`
+
+```bash
+curl -X POST http://localhost:3000/pr/review \
+  -H "Content-Type: application/json" \
+  -d '{"input":"Refactored auth middleware and updated token validation"}'
+```
+
+```json
+{
+  "success": true,
+  "data": { "summary": "...", "risks": ["..."], ... }
+}
+```
+
+### Error responses
+
+**400 – Invalid request body**
+
+```json
+{ "success": false, "error": "Invalid request body" }
+```
+
+**500 – Internal server error**
+
+```json
+{ "success": false, "error": "Internal server error" }
+```
+
+> **Note:** The CLI entrypoint (`npm run dev`) remains fully functional alongside the API.
+
 ## Building
 
 ```bash
 npm run build
 ```
 
-Compiles TypeScript to `dist/`.
+Compiles TypeScript to `dist/`. To run the compiled API server: `npm run start:api`.
 
