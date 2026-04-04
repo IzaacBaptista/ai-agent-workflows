@@ -7,6 +7,7 @@ import { buildGitHubPRReviewInput } from "./helpers/buildGitHubPRReviewInput";
 import { fetchGitHubPR } from "./helpers/fetchGitHubPR";
 import { formatPRReviewComment } from "./helpers/formatPRReviewComment";
 import { postPRComment } from "./integrations/github/postPRComment";
+import { getAllRunMemories, getRunMemory } from "./memory/simpleMemory";
 
 const app = express();
 
@@ -28,7 +29,7 @@ app.post("/issue/analyze", async (req: Request, res: Response, next: NextFunctio
   }
   try {
     const data = await runIssueWorkflow(parsed.data.input);
-    res.json({ success: true, data });
+    res.json(data);
   } catch (err) {
     next(err);
   }
@@ -43,7 +44,7 @@ app.post("/bug/analyze", async (req: Request, res: Response, next: NextFunction)
   }
   try {
     const data = await runBugWorkflow(parsed.data.input);
-    res.json({ success: true, data });
+    res.json(data);
   } catch (err) {
     next(err);
   }
@@ -58,7 +59,7 @@ app.post("/pr/review", async (req: Request, res: Response, next: NextFunction) =
   }
   try {
     const data = await runPRReviewWorkflow(parsed.data.input);
-    res.json({ success: true, data });
+    res.json(data);
   } catch (err) {
     next(err);
   }
@@ -82,7 +83,7 @@ app.post("/github/pr-review", async (req: Request, res: Response, next: NextFunc
   try {
     const input = buildGitHubPRReviewInput(parsed.data);
     const data = await runPRReviewWorkflow(input);
-    res.json({ success: true, data });
+    res.json(data);
   } catch (err) {
     next(err);
   }
@@ -106,7 +107,7 @@ app.post("/github/pr-review/fetch", async (req: Request, res: Response, next: Ne
     const prDetails = await fetchGitHubPR(repository, prNumber, githubToken);
     const input = buildGitHubPRReviewInput(prDetails);
     const data = await runPRReviewWorkflow(input);
-    res.json({ success: true, data });
+    res.json(data);
   } catch (err) {
     next(err);
   }
@@ -147,6 +148,41 @@ app.post("/github/pr-review/comment", async (req: Request, res: Response, next: 
     res.json({ success: true, data: result.data, meta: { commentPosted, commentError } });
   } catch (err) {
     next(err);
+  }
+});
+
+app.get("/runs", (_req: Request, res: Response) => {
+  const runs = getAllRunMemories().map((run) => ({
+    runId: run.runId,
+    workflowName: run.workflowName,
+    status: run.status,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    stepCount: run.steps.length,
+  }));
+
+  res.json({ success: true, data: runs });
+});
+
+app.get("/runs/:runId", (req: Request, res: Response) => {
+  try {
+    const { runId } = req.params as { runId: string };
+    const run = getRunMemory(runId);
+    res.json({ success: true, data: run });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(404).json({ success: false, error: message });
+  }
+});
+
+app.get("/runs/:runId/artifacts", (req: Request, res: Response) => {
+  try {
+    const { runId } = req.params as { runId: string };
+    const run = getRunMemory(runId);
+    res.json({ success: true, data: run.artifacts });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(404).json({ success: false, error: message });
   }
 });
 

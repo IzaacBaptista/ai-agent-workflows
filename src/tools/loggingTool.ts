@@ -19,6 +19,19 @@ interface AgentExecutionLog {
   outputPreview?: string;
 }
 
+interface WorkflowStepLog {
+  workflow: string;
+  stepId: string;
+  stepName: string;
+  status: "running" | "completed" | "failed";
+  timestamp: string;
+  attempt: number;
+  agentName?: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  error?: string;
+}
+
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   debug: 10,
   info: 20,
@@ -56,7 +69,7 @@ function buildPreview(value: string, limit = 300): string {
   return `${normalized.slice(0, limit)}...`;
 }
 
-function writeLog(level: LogLevel, payload: AgentExecutionLog): void {
+function writeLog(level: LogLevel, payload: AgentExecutionLog | WorkflowStepLog): void {
   if (!shouldLog(level)) {
     return;
   }
@@ -125,4 +138,30 @@ export function logAgentExecutionFailure(
     error: message,
     ...(env.LOG_FULL_PAYLOADS ? { inputPreview: buildPreview(input) } : {})
   });
+}
+
+export function logWorkflowStep(workflowName: string, step: {
+  stepId: string;
+  name: string;
+  status: "running" | "completed" | "failed";
+  attempt: number;
+  agentName?: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  error?: string;
+}): void {
+  const payload: WorkflowStepLog = {
+    workflow: workflowName,
+    stepId: step.stepId,
+    stepName: step.name,
+    status: step.status,
+    timestamp: new Date().toISOString(),
+    attempt: step.attempt,
+    agentName: step.agentName,
+    ...(step.inputSummary ? { inputSummary: buildPreview(step.inputSummary) } : {}),
+    ...(step.outputSummary ? { outputSummary: buildPreview(step.outputSummary) } : {}),
+    ...(step.error ? { error: step.error } : {}),
+  };
+
+  writeLog(step.status === "failed" ? "error" : "info", payload);
 }
