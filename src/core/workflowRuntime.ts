@@ -1,6 +1,11 @@
 import { getDelegatableAgentNames, isRegisteredAgentName, runDelegatedAgent } from "../agents/agentRegistry";
 import { buildRelevantMemoryContext } from "../memory/runMemoryStore";
-import { buildWorkingMemory, getWorkingMemorySignature, summarizeWorkingMemory } from "../memory/workingMemory";
+import {
+  buildWorkingMemory,
+  getCommandDecisionSignature,
+  getWorkingMemorySignature,
+  summarizeWorkingMemory,
+} from "../memory/workingMemory";
 import {
   appendRunStep,
   completeRun,
@@ -490,12 +495,19 @@ export class WorkflowRuntime {
     }
 
     const signature = buildWorkflowToolSignature(action.toolName, validatedInput.data);
-    const workingMemorySignature = getWorkingMemorySignature(this.getWorkingMemory());
+    const workingMemory = this.getWorkingMemory();
+    const workingMemorySignature = getWorkingMemorySignature(workingMemory);
+    const decisionSignature =
+      toolName === "run_command"
+        ? getCommandDecisionSignature(workingMemory)
+        : workingMemorySignature;
     const previousCalls = (this.getArtifactsValue<WorkflowToolCallRecord[]>("toolCalls") ?? []).filter(
       (record) =>
         record.toolName === action.toolName &&
         record.signature === signature &&
-        record.workingMemorySignature === workingMemorySignature,
+        (toolName === "run_command"
+          ? record.decisionSignature === decisionSignature
+          : record.workingMemorySignature === workingMemorySignature),
     );
 
     if (previousCalls.length > this.policy.maxRepeatedIdenticalToolCalls) {
@@ -535,6 +547,7 @@ export class WorkflowRuntime {
         suppressed: true,
         cached: true,
         workingMemorySignature,
+        decisionSignature,
         createdAt: new Date().toISOString(),
       } satisfies WorkflowToolCallRecord);
       this.recordProgress(`tool_call:${action.toolName}`, signature, false);
@@ -569,6 +582,7 @@ export class WorkflowRuntime {
       suppressed: false,
       cached: false,
       workingMemorySignature,
+      decisionSignature,
       createdAt: new Date().toISOString(),
     } satisfies WorkflowToolCallRecord);
 

@@ -1,4 +1,5 @@
 import {
+  CommandExecutionResult,
   RelevantMemoryContext,
   WorkflowCritique,
   WorkflowRunRecord,
@@ -49,6 +50,7 @@ function getRunSearchText(run: WorkflowRunRecord): string {
     typeof run.artifacts.forcedFinalAnalysisReason === "string"
       ? run.artifacts.forcedFinalAnalysisReason
       : "",
+    JSON.stringify(run.artifacts.commandResults ?? []),
     JSON.stringify(run.artifacts.critiques ?? []),
     JSON.stringify(run.artifacts.validationErrors ?? []),
   ].join(" ");
@@ -134,6 +136,24 @@ export function extractToolLoopPatterns(runs: WorkflowRunRecord[]): string[] {
   ).slice(0, 5);
 }
 
+function getCommandStatus(result: CommandExecutionResult): string {
+  if (result.timedOut) {
+    return "timed_out";
+  }
+
+  return result.exitCode === 0 ? "passed" : "failed";
+}
+
+export function extractCommandPatterns(runs: WorkflowRunRecord[]): string[] {
+  return uniqueStrings(
+    runs.flatMap((run) =>
+      (((run.artifacts.commandResults as CommandExecutionResult[] | undefined) ?? [])).map(
+        (result) => `${result.command}_${getCommandStatus(result)}`,
+      ),
+    ),
+  ).slice(0, 5);
+}
+
 export function summarizeRelevantRuns(runs: WorkflowRunRecord[]): string {
   if (runs.length === 0) {
     return "No relevant memory found.";
@@ -148,12 +168,16 @@ export function summarizeRelevantRuns(runs: WorkflowRunRecord[]): string {
         typeof run.artifacts.forcedFinalAnalysisReason === "string"
           ? run.artifacts.forcedFinalAnalysisReason
           : "none";
+      const commandSummary = (((run.artifacts.commandResults as CommandExecutionResult[] | undefined) ?? []))
+        .map((result) => `${result.command}:${getCommandStatus(result)}:${result.exitCode ?? "null"}`)
+        .join(", ") || "none";
 
       return [
         `- ${run.workflowName} (${run.status})`,
         `  input=${run.input.slice(0, 120)}`,
         `  critiques=${critiqueCount}`,
         `  forcedFinalization=${forcedReason}`,
+        `  commands=${commandSummary}`,
       ].join("\n");
     })
     .join("\n");
@@ -168,6 +192,7 @@ export function buildRelevantMemoryContext(
   const failurePatterns = extractFailurePatterns(runs);
   const critiquePatterns = extractCritiquePatterns(runs);
   const toolLoopPatterns = extractToolLoopPatterns(runs);
+  const commandPatterns = extractCommandPatterns(runs);
 
   return {
     summary: [
@@ -182,11 +207,15 @@ export function buildRelevantMemoryContext(
       "",
       "Tool loop patterns:",
       ...(toolLoopPatterns.length > 0 ? toolLoopPatterns.map((item) => `- ${item}`) : ["- none"]),
+      "",
+      "Command patterns:",
+      ...(commandPatterns.length > 0 ? commandPatterns.map((item) => `- ${item}`) : ["- none"]),
     ].join("\n"),
     runs,
     failurePatterns,
     critiquePatterns,
     toolLoopPatterns,
+    commandPatterns,
     memoryHits: runs.length,
   };
 }

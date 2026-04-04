@@ -195,6 +195,7 @@ export interface WorkflowToolCallRecord {
   suppressed: boolean;
   cached: boolean;
   workingMemorySignature: string;
+  decisionSignature?: string;
   createdAt: string;
 }
 
@@ -220,6 +221,8 @@ export interface WorkingMemorySnapshot {
   lastCritique?: WorkflowCritique;
   toolCalls: WorkflowToolCallRecord[];
   delegations: WorkflowDelegationRecord[];
+  commandResults: CommandExecutionResult[];
+  commandSignals: string[];
   forcedFinalizationReason?: string;
   validationErrors: WorkflowValidationError[];
   evidence: string[];
@@ -231,6 +234,7 @@ export interface RelevantMemoryContext {
   failurePatterns: string[];
   critiquePatterns: string[];
   toolLoopPatterns: string[];
+  commandPatterns: string[];
   memoryHits: number;
 }
 

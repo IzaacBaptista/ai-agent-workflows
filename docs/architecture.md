@@ -47,6 +47,8 @@ Memory has two layers:
 - working memory derived from the current run state and artifacts
 - persisted run memory loaded from disk and queried for relevant prior runs
 
+Working memory now includes command outcomes and command signals such as `build_failed`, `build_passed`, and `test_timed_out`. Relevant memory also summarizes prior command patterns so planner, replanner, and critic can avoid re-running the same `build` or `test` when the non-command state has not materially changed.
+
 Each run still contains plan, replans, critiques, artifacts, and step history. Persisted runs are subject to retention limits so older runs are pruned.
 
 ### Prompts

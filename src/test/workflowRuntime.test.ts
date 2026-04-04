@@ -444,6 +444,100 @@ test("WorkflowRuntime suppresses repeated identical tool calls and reuses cached
   assert.equal(toolCalls[2].suppressed, true);
 });
 
+test("WorkflowRuntime suppresses repeated identical run_command calls when non-command state did not change", async () => {
+  setRunCommandExecutorForTesting(async (command) => ({
+    command,
+    exitCode: 1,
+    stdout: "",
+    stderr: "build failed",
+    timedOut: false,
+    durationMs: 15,
+    signal: null,
+  }));
+
+  try {
+    const runtime = new WorkflowRuntime({
+      workflowName: "RuntimeCommandLoopWorkflow",
+      input: "repeat build command",
+      policy: {
+        maxSteps: 10,
+        maxRetriesPerStep: 0,
+        timeoutMs: 1000,
+        maxConsecutiveNoProgress: 1,
+      },
+    });
+
+    let replanCount = 0;
+    const definition = createDefinition({
+      workflowName: "RuntimeCommandLoopWorkflow",
+      runPlanner: async () => ({
+        summary: "start with build",
+        actions: [
+          {
+            type: "tool_call",
+            toolName: "run_command",
+            input: { command: "build" },
+            reason: "need build evidence",
+          },
+          {
+            type: "finalize",
+            task: "finish after build evidence",
+            reason: "finish after verification",
+          },
+        ],
+      }),
+      runReplanner: async () => {
+        replanCount += 1;
+        if (replanCount === 1) {
+          return {
+            summary: "repeat build without new evidence",
+            actions: [
+              {
+                type: "tool_call",
+                toolName: "run_command",
+                input: { command: "build" },
+                reason: "repeat build intentionally",
+              },
+              {
+                type: "finalize",
+                task: "finish after repeated build",
+                reason: "finish after repetition",
+              },
+            ],
+          } satisfies WorkflowReplan;
+        }
+
+        return {
+          summary: "finalize after cached build",
+          actions: [
+            {
+              type: "finalize",
+              task: "finish after repeated build",
+              reason: "enough build evidence",
+            },
+          ],
+        } satisfies WorkflowReplan;
+      },
+    });
+
+    const result = await runtime.runActionQueue(definition, "repeat build command");
+    const toolCalls = runtime.getRunRecord().artifacts.toolCalls as Array<{
+      suppressed: boolean;
+      toolName: string;
+      decisionSignature?: string;
+    }>;
+
+    assert.equal(result.note, 'Forced final analysis after tool_call "run_command":1');
+    assert.equal(runtime.getMeta().toolCallCount, 1);
+    assert.equal(toolCalls.length, 2);
+    assert.equal(toolCalls[1].toolName, "run_command");
+    assert.equal(toolCalls[1].suppressed, true);
+    assert.equal(typeof toolCalls[1].decisionSignature, "string");
+  } finally {
+    setRunCommandExecutorForTesting();
+  }
+});
+
 test("WorkflowRuntime follows critic nextAction and records critic redirects", async () => {
   const runtime = new WorkflowRuntime({
     workflowName: "RuntimeCriticRedirectWorkflow",
@@ -563,6 +657,62 @@ test("WorkflowRuntime uses relevant memory when planning and changes outcome", a
 
   assert.equal(result.note, "memory-aware finalize:1");
   assert.ok(sawRelevantMemory);
+  assert.ok(runtime.getMeta().memoryHits > 0);
+});
+
+test("WorkflowRuntime exposes prior command outcomes in relevant memory for planning", async () => {
+  const priorRuntime = new WorkflowRuntime({
+    workflowName: "CommandMemoryWorkflow",
+    input: "runtime build regression",
+  });
+  priorRuntime.saveArtifact("commandResults", [
+    {
+      command: "build",
+      exitCode: 1,
+      stdout: "",
+      stderr: "Type error in workflowRuntime.ts",
+      timedOut: false,
+      durationMs: 12,
+      signal: null,
+    },
+  ]);
+  priorRuntime.complete();
+
+  let sawCommandPattern = false;
+  const runtime = new WorkflowRuntime({
+    workflowName: "CommandMemoryWorkflow",
+    input: "runtime build regression",
+    policy: {
+      maxSteps: 8,
+      maxRetriesPerStep: 0,
+      timeoutMs: 1000,
+    },
+  });
+
+  const definition = createDefinition({
+    workflowName: "CommandMemoryWorkflow",
+    runPlanner: async (_input, memoryContext) => {
+      sawCommandPattern =
+        memoryContext.commandPatterns.includes("build_failed") &&
+        memoryContext.summary.includes("commands=build:failed:1");
+
+      return {
+        summary: "command-memory plan",
+        actions: [
+          {
+            type: "finalize",
+            task: sawCommandPattern ? "command-memory finalize" : "default finalize",
+            reason: "use command memory if available",
+          },
+        ],
+      } satisfies WorkflowPlan;
+    },
+  });
+
+  const result = await runtime.runActionQueue(definition, "runtime build regression");
+
+  assert.equal(result.note, "command-memory finalize:1");
+  assert.ok(sawCommandPattern);
   assert.ok(runtime.getMeta().memoryHits > 0);
 });
 
