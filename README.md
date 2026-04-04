@@ -162,6 +162,8 @@ All three workflows follow the same execution pattern:
    feeds relevant prior runs and working memory back into planner, replanner, and critic.
 8. Controlled command execution
    allows the model to request `run_command` for `build` or `test` when real project evidence is needed.
+9. Command-aware decision making
+   teaches planner, replanner, and critic to prefer `run_command` in bug and PR scenarios where executable build/test evidence is more useful than additional code search or file reads.
 
 ## Project structure
 

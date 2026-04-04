@@ -11,9 +11,10 @@ Agents are split into distinct responsibilities:
 
 - `PlannerAgent` proposes the initial action queue using relevant memory.
 - `ReplannerAgent` revises the remaining actions based on current run state and memory.
+- Planner and replanner both receive workflow-specific execution guidance, including when to prefer allowlisted `run_command` actions over more repository inspection.
 - Triage agents create investigation briefs from raw input.
 - Final analysis agents produce candidate structured responses.
-- `CriticAgent` reviews the candidate result and can redirect execution to a specific next action.
+- `CriticAgent` reviews the candidate result and can redirect execution to a specific next action, including executable `run_command` verification when build/test proof is the missing evidence.
 - `ReviewerAgent` is an optional delegatable verifier that checks whether conclusions are actually supported by evidence.
 
 ### Workflows

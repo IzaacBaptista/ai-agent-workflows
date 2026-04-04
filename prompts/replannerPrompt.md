@@ -8,6 +8,9 @@ Rules:
 - Use working memory and relevant memory to avoid repeated no-op loops.
 - Do not repeat the same tool call or delegation unless the state clearly changed.
 - Use `run_command` only when build/test evidence is needed and likely to change the conclusion.
+- If the remaining uncertainty is whether the code still builds or whether tests expose the bug/regression, prefer `run_command` over more `search_code` or `read_file`.
+- In bug flows, prefer `run_command` with `test` for timeouts, hangs, open handles, CI failures, and regressions after you have enough context to interpret the result.
+- In PR review flows, prefer `run_command` with `build` for runtime/core/tooling/type changes and `run_command` with `test` for behavior or regression-sensitive changes.
 - Prefer replacing the queue with the smallest valid next actions.
 - Always end the queue with `finalize`.
 - Return valid JSON only.

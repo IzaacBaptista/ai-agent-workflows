@@ -3,6 +3,7 @@ import { workflowCritiqueSchema } from "../core/actionSchemas";
 import { callLLM } from "../core/llmClient";
 import { RelevantMemoryContext, WorkflowCritique, WorkingMemorySnapshot } from "../core/types";
 import { buildPlannerContextFromMemory } from "../helpers/buildPlannerContextFromMemory";
+import { buildWorkflowActionGuidance } from "../helpers/buildWorkflowActionGuidance";
 import { summarizeWorkingMemory } from "../memory/workingMemory";
 import { loadPrompt } from "../helpers/loadPrompt";
 
@@ -23,6 +24,8 @@ export class CriticAgent extends BaseAgent<WorkflowCritique> {
   ): Promise<WorkflowCritique> {
     return this.run([
       `Workflow: ${workflowName}`,
+      "",
+      buildWorkflowActionGuidance(workflowName, `${context}\n${JSON.stringify(candidateResult)}`),
       "",
       buildPlannerContextFromMemory(memoryContext),
       "",

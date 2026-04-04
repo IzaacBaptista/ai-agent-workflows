@@ -3,6 +3,7 @@ import { workflowReplanSchema } from "../core/actionSchemas";
 import { callLLM } from "../core/llmClient";
 import { RelevantMemoryContext, RegisteredAgentName, WorkflowReplan, WorkflowToolName } from "../core/types";
 import { buildPlannerContextFromMemory } from "../helpers/buildPlannerContextFromMemory";
+import { buildWorkflowActionGuidance } from "../helpers/buildWorkflowActionGuidance";
 import { loadPrompt } from "../helpers/loadPrompt";
 
 export class ReplannerAgent extends BaseAgent<WorkflowReplan> {
@@ -26,6 +27,8 @@ export class ReplannerAgent extends BaseAgent<WorkflowReplan> {
       "Available runtime actions: analyze, tool_call, delegate, finalize",
       `Available tools: ${availableTools.join(", ")}`,
       `Delegatable agents: ${delegatableAgents.join(", ")}`,
+      "",
+      buildWorkflowActionGuidance(workflowName, context),
       "",
       buildPlannerContextFromMemory(memoryContext),
       "",

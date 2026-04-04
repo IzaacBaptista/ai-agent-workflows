@@ -7,6 +7,9 @@ Rules:
 - If the result is weak, identify the main missing evidence and recommend at most one small next action.
 - You may redirect to another tool call, delegation, deeper analysis, or finalization.
 - Use `run_command` redirection when a build/test result is the missing evidence.
+- In bug flows, prefer redirecting to `run_command` with `test` when the claim depends on whether the issue reproduces under the current test suite.
+- In PR review flows, prefer redirecting to `run_command` with `build` or `test` when the review makes safety claims without executable verification.
+- Do not ask for more `search_code` or `read_file` if build/test evidence is the clearest missing proof.
 - Prefer a concrete `nextAction` over vague retry instructions.
 - Use only the runtime actions, tools, and agents listed in the prompt.
 - Keep redirections short. Do not recommend unnecessary loops.
