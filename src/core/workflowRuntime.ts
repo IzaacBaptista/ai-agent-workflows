@@ -30,10 +30,17 @@ interface ExecuteStepOptions {
   outputSummary?: (value: unknown) => string | undefined;
 }
 
+interface RuntimeProgressState {
+  lastAction?: string;
+  lastSignature?: string;
+  consecutiveNoProgress: number;
+}
+
 const DEFAULT_POLICY: WorkflowExecutionPolicy = {
   maxSteps: 10,
   maxRetriesPerStep: 1,
   timeoutMs: 60_000,
+  maxConsecutiveNoProgress: 1,
 };
 
 function createRunId(workflowName: string): string {
@@ -88,6 +95,38 @@ export class WorkflowRuntime {
   saveCritique(critique: WorkflowCritique): void {
     const current = this.getArtifactsValue<WorkflowCritique[]>("critiques") ?? [];
     saveRunArtifact(this.runId, "critiques", [...current, critique]);
+  }
+
+  recordProgress(action: string, signature: string, progressMade: boolean): number {
+    const current = this.getArtifactsValue<RuntimeProgressState>("runtimeProgressState") ?? {
+      consecutiveNoProgress: 0,
+    };
+
+    const repeatedAction = current.lastAction === action && current.lastSignature === signature;
+    const effectiveProgressMade = progressMade && !repeatedAction;
+    const consecutiveNoProgress =
+      !effectiveProgressMade && repeatedAction
+        ? current.consecutiveNoProgress + 1
+        : !effectiveProgressMade
+          ? 1
+          : 0;
+
+    saveRunArtifact(this.runId, "runtimeProgressState", {
+      lastAction: action,
+      lastSignature: signature,
+      consecutiveNoProgress,
+    } satisfies RuntimeProgressState);
+
+    return consecutiveNoProgress;
+  }
+
+  shouldForceFinalAnalysis(): boolean {
+    const state = this.getArtifactsValue<RuntimeProgressState>("runtimeProgressState");
+    return (state?.consecutiveNoProgress ?? 0) >= this.policy.maxConsecutiveNoProgress;
+  }
+
+  forceFinalAnalysis(reason: string): void {
+    saveRunArtifact(this.runId, "forcedFinalAnalysisReason", reason);
   }
 
   getRunRecord(): WorkflowRunRecord {
@@ -145,8 +184,9 @@ export class WorkflowRuntime {
       appendRunStep(this.runId, stepRecord);
       logWorkflowStep(this.workflowName, stepRecord);
 
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
       try {
-        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<T>((_, reject) => {
           timeoutHandle = setTimeout(
             () => reject(new Error(`Step "${name}" timed out`)),
@@ -158,10 +198,6 @@ export class WorkflowRuntime {
           executor(),
           timeoutPromise,
         ]);
-
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-        }
 
         const completedStep: Partial<WorkflowStepRecord> = {
           status: "completed",
@@ -195,6 +231,10 @@ export class WorkflowRuntime {
 
         if (attempt > this.policy.maxRetriesPerStep) {
           throw error;
+        }
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
         }
       }
     }

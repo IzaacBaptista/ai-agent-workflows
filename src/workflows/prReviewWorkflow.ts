@@ -120,6 +120,16 @@ function buildReplanContext(
   ].join("\n");
 }
 
+function fallbackToFinalAnalysis(runtime: WorkflowRuntime, reason: string): WorkflowPlanStep[] {
+  runtime.forceFinalAnalysis(reason);
+  return [
+    {
+      action: "final_analysis",
+      purpose: `Fallback to final analysis: ${reason}`,
+    },
+  ];
+}
+
 export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<PRReview>> {
   const execution = startAgentExecution("PRReviewWorkflow", diff);
   const runtime = new WorkflowRuntime({
@@ -209,6 +219,18 @@ export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<
         );
 
         runtime.saveArtifact("codeSearchResults", toolResult.data);
+        const searchSignature = currentTriage.codeSearchTerms.map((term) => term.trim().toLowerCase()).sort().join("|");
+        const searchMatches = Object.values(
+          toolResult.data as Record<string, CodeSearchResult[]>,
+        ).reduce((count, matches) => count + matches.length, 0);
+        runtime.recordProgress("search_code", searchSignature, searchMatches > 0);
+        if (runtime.shouldForceFinalAnalysis()) {
+          remainingSteps = fallbackToFinalAnalysis(
+            runtime,
+            "Repeated search_code steps produced no new matches",
+          );
+          continue;
+        }
         if (remainingSteps.length > 0) {
           const replan = await runtime.executeStep(
             "replan",
@@ -256,6 +278,16 @@ export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<
         );
 
         runtime.saveArtifact("fileReadResults", toolResult.data);
+        const readSignature = files.slice().sort().join("|");
+        const readFilesCount = (toolResult.data as FileReadResult[]).length;
+        runtime.recordProgress("read_file", readSignature, readFilesCount > 0);
+        if (runtime.shouldForceFinalAnalysis()) {
+          remainingSteps = fallbackToFinalAnalysis(
+            runtime,
+            "Repeated read_file steps inspected the same files without progress",
+          );
+          continue;
+        }
         if (remainingSteps.length > 0) {
           const replan = await runtime.executeStep(
             "replan",
@@ -290,6 +322,7 @@ export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<
         );
 
         runtime.saveArtifact("externalApiResult", toolResult.data);
+        runtime.recordProgress("call_external_api", "pr-regression-check", true);
         continue;
       }
 

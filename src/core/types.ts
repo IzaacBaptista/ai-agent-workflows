@@ -12,6 +12,7 @@ export interface WorkflowExecutionPolicy {
   maxSteps: number;
   maxRetriesPerStep: number;
   timeoutMs: number;
+  maxConsecutiveNoProgress: number;
 }
 
 export interface WorkflowStepRecord {

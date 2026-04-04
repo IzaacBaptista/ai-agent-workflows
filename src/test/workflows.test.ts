@@ -250,3 +250,84 @@ test("runPRReviewWorkflow fails after critic rejects both attempts", async () =>
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
   }
 });
+
+test("runPRReviewWorkflow falls back to final_analysis when read_file repeats without progress", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  const responses = [
+    buildLlmResponse({
+      summary: "PR workflow plan",
+      steps: [
+        { action: "triage", purpose: "triage first" },
+        { action: "search_code", purpose: "find files" },
+        { action: "read_file", purpose: "inspect files" },
+        { action: "final_analysis", purpose: "finish" },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "PR triage summary",
+      reviewFocus: ["runtime"],
+      codeSearchTerms: ["WorkflowRuntime"],
+      regressionChecks: ["runtime tests"],
+    }),
+    buildLlmResponse({
+      summary: "Continue with search then read",
+      steps: [
+        { action: "search_code", purpose: "find files" },
+        { action: "read_file", purpose: "inspect files" },
+        { action: "final_analysis", purpose: "finish" },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Continue with read then finish",
+      steps: [
+        { action: "read_file", purpose: "inspect files" },
+        { action: "final_analysis", purpose: "finish" },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Repeat read",
+      steps: [
+        { action: "read_file", purpose: "inspect the same files again" },
+        { action: "final_analysis", purpose: "finish" },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Final PR result after fallback",
+      impacts: ["runtime behavior stabilized"],
+      risks: ["replanner may still over-read"],
+      suggestions: ["add dedupe tests"],
+      testRecommendations: ["cover repeated read_file fallback"],
+    }),
+    buildLlmResponse({
+      approved: true,
+      summary: "approved",
+      gaps: [],
+      recommendedActions: [],
+    }),
+  ];
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const result = await runPRReviewWorkflow("Review repeated read_file behavior");
+
+    assert.equal(result.success, true);
+    if (!result.success) {
+      return;
+    }
+
+    assert.equal(result.data.summary, "Final PR result after fallback");
+    assert.equal(result.meta.workflowName, "PRReviewWorkflow");
+    assert.equal(result.meta.status, "completed");
+    assert.ok(result.meta.stepCount <= 10);
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+  }
+});
