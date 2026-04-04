@@ -434,6 +434,20 @@ Run the full suite with:
 npm run test
 ```
 
+Run the higher-level runtime eval harness with:
+
+```bash
+npm run evals
+```
+
+The eval harness uses isolated `.eval-runs` storage and checks scenario-level behavior such as:
+
+- preferring `run_command(test)` in bug investigation
+- using `git_status` and `git_diff` in PR review
+- suppressing repeated identical tool calls
+- critic-driven redirection to executable evidence
+- planner decisions influenced by relevant memory
+
 The current suite covers:
 
 - resilient parsing of OpenAI Responses output in `BaseAgent`

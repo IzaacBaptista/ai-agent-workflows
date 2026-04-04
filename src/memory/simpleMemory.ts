@@ -184,4 +184,25 @@ export function getAllRunMemories(): WorkflowRunRecord[] {
   return Array.from(runStore.values());
 }
 
+export function resetRunMemories(options: { clearPersistedRuns?: boolean } = {}): void {
+  store.clear();
+  runStore.clear();
+
+  if (options.clearPersistedRuns) {
+    ensureRunStorageDir();
+
+    for (const fileName of readdirSync(runStorageDir)) {
+      if (!fileName.endsWith(".json") && !fileName.endsWith(".tmp")) {
+        continue;
+      }
+
+      rmSync(join(runStorageDir, fileName), { force: true });
+    }
+
+    return;
+  }
+
+  loadPersistedRuns();
+}
+
 loadPersistedRuns();

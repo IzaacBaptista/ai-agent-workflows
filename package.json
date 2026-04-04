@@ -8,6 +8,7 @@
     "build": "tsc",
     "lint": "tsc --noEmit",
     "test": "npm run build && node --test dist/test/**/*.test.js",
+    "evals": "RUN_STORAGE_DIR=.eval-runs ts-node src/evals/runEvals.ts",
     "start:api": "node dist/server.js"
   },
   "dependencies": {
