@@ -20,6 +20,13 @@ export interface BugAnalysis {
   risks: string[];
 }
 
+export interface BugTriage {
+  summary: string;
+  hypotheses: string[];
+  codeSearchTerms: string[];
+  apiChecks: string[];
+}
+
 export interface PRReview {
   summary: string;
   impacts: string[];
