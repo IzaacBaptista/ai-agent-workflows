@@ -236,7 +236,7 @@ test("runBugWorkflow planner guidance prefers run_command test for runtime test 
     if (prompt.includes("You are a workflow planner")) {
       plannerSawRunCommandGuidance =
         prompt.includes("In BugWorkflow, prefer `run_command` with `test`") &&
-        prompt.includes("Allowed run_command commands: build, test");
+        prompt.includes("Allowed run_command commands: build, test, lint");
     }
 
     const next = responses.shift();
