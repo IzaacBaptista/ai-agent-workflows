@@ -3,7 +3,14 @@ import { PlannerAgent } from "../agents/plannerAgent";
 import { PRAgent } from "../agents/prAgent";
 import { PRTriageAgent } from "../agents/prTriageAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
-import { CommandExecutionResult, PRReview, PRTriage, WorkflowResult } from "../core/types";
+import {
+  CommandExecutionResult,
+  GitDiffResult,
+  GitStatusResult,
+  PRReview,
+  PRTriage,
+  WorkflowResult,
+} from "../core/types";
 import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
@@ -19,6 +26,8 @@ function buildPRWorkflowContext(
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
   commandResults: CommandExecutionResult[] | undefined,
+  gitStatusResult: GitStatusResult | undefined,
+  gitDiffResult: GitDiffResult | undefined,
 ): string {
   return [
     "Pull request input:",
@@ -55,6 +64,26 @@ function buildPRWorkflowContext(
       (result) =>
         `- ${result.command}: exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${result.stdout.replace(/\n/g, " ").trim()} stderr=${result.stderr.replace(/\n/g, " ").trim()}`,
     ),
+    "",
+    "Git status:",
+    ...(gitStatusResult
+      ? gitStatusResult.entries.length > 0
+        ? gitStatusResult.entries.map(
+            (entry) => `- ${entry.indexStatus}${entry.workingTreeStatus} ${entry.path}`,
+          )
+        : ["- clean working tree"]
+      : ["No git status result"]),
+    "",
+    "Git diff:",
+    ...(gitDiffResult
+      ? [
+          `- staged=${gitDiffResult.staged} files=${gitDiffResult.changedFiles.length} truncated=${gitDiffResult.truncated}`,
+          ...gitDiffResult.changedFiles.map((file) => `  - ${file}`),
+          gitDiffResult.diff.length > 0
+            ? `- diff preview: ${gitDiffResult.diff.replace(/\n/g, " ").trim()}`
+            : "- no diff output",
+        ]
+      : ["No git diff result"]),
   ].join("\n");
 }
 
@@ -128,7 +157,21 @@ const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
     const commandResults = runtime.getRunRecord().artifacts.commandResults as
       | CommandExecutionResult[]
       | undefined;
-    return buildPRWorkflowContext(input, triage, codeSearchResults, fileReadResults, commandResults);
+    const gitStatusResult = runtime.getRunRecord().artifacts.gitStatusResult as
+      | GitStatusResult
+      | undefined;
+    const gitDiffResult = runtime.getRunRecord().artifacts.gitDiffResult as
+      | GitDiffResult
+      | undefined;
+    return buildPRWorkflowContext(
+      input,
+      triage,
+      codeSearchResults,
+      fileReadResults,
+      commandResults,
+      gitStatusResult,
+      gitDiffResult,
+    );
   },
   buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
     buildPRCritiqueContext(input, finalContext),

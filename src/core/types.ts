@@ -1,6 +1,13 @@
 export type WorkflowRunStatus = "running" | "completed" | "failed";
 export type WorkflowStepStatus = "running" | "completed" | "failed";
-export const WORKFLOW_TOOL_NAMES = ["search_code", "read_file", "call_external_api", "run_command"] as const;
+export const WORKFLOW_TOOL_NAMES = [
+  "search_code",
+  "read_file",
+  "call_external_api",
+  "run_command",
+  "git_status",
+  "git_diff",
+] as const;
 export type WorkflowToolName = typeof WORKFLOW_TOOL_NAMES[number];
 export type WorkflowCommandName = "build" | "test" | "lint";
 export const REGISTERED_AGENT_NAMES = [
@@ -185,6 +192,24 @@ export interface CommandExecutionResult {
   timedOut: boolean;
   durationMs: number;
   signal?: NodeJS.Signals | null;
+}
+
+export interface GitStatusEntry {
+  indexStatus: string;
+  workingTreeStatus: string;
+  path: string;
+}
+
+export interface GitStatusResult {
+  entries: GitStatusEntry[];
+  raw: string;
+}
+
+export interface GitDiffResult {
+  staged: boolean;
+  diff: string;
+  changedFiles: string[];
+  truncated: boolean;
 }
 
 export interface WorkflowToolCallRecord {

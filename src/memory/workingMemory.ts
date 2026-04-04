@@ -49,6 +49,14 @@ function buildEvidence(run: WorkflowRunRecord): string[] {
     evidence.push("command_results");
   }
 
+  if (run.artifacts.gitStatusResult) {
+    evidence.push("git_status_result");
+  }
+
+  if (run.artifacts.gitDiffResult) {
+    evidence.push("git_diff_result");
+  }
+
   if (run.artifacts.reviewerAssessment) {
     evidence.push("reviewer_assessment");
   }

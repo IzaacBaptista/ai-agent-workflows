@@ -68,6 +68,7 @@ export function buildWorkflowActionGuidance(workflowName: string, context: strin
       "- In PRReviewWorkflow, prefer `run_command` with `build` when reviewing changes to runtime, core, workflows, types, tools, agents, server code, or refactors that may affect compilation.",
       "- In PRReviewWorkflow, prefer `run_command` with `test` when the PR touches timers, memory, runtime behavior, regression-prone paths, or test/CI semantics.",
       "- In PRReviewWorkflow, prefer `run_command` with `lint` for static hygiene checks around types, tooling, and surface-level integration changes when a full build is not the narrowest proof needed.",
+      "- In PRReviewWorkflow, prefer `git_status` to understand the current local change set and `git_diff` to inspect concrete modified hunks when the review needs real repository context beyond the user-provided summary.",
       "- Do not give a high-confidence PR conclusion about safety if build/test evidence is the main missing proof and no relevant command result exists yet.",
     );
   } else if (workflowName === "IssueWorkflow") {

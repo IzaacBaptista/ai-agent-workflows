@@ -592,6 +592,10 @@ export class WorkflowRuntime {
       this.saveArtifact("fileReadResults", result.data);
     } else if (toolName === "run_command") {
       this.appendArtifactArray("commandResults", result.data);
+    } else if (toolName === "git_status") {
+      this.saveArtifact("gitStatusResult", result.data);
+    } else if (toolName === "git_diff") {
+      this.saveArtifact("gitDiffResult", result.data);
     } else {
       this.saveArtifact("externalApiResult", result.data);
     }

@@ -37,6 +37,7 @@ Tools execute concrete actions:
 - local code search
 - direct file reads with scope restrictions (`src/` and approved extensions only)
 - allowlisted command execution for local verification (`build`, `test`, and `lint`; here `lint` is `tsc --noEmit`)
+- Git inspection for local repository context (`git_status` and `git_diff`)
 - external API calls
 - tool execution dispatch
 - GitHub comment posting for PR review flows
@@ -66,21 +67,22 @@ Raw input + relevant memory → Planner → Action loop (analyze/tool_call/deleg
 ### Issue Workflow
 
 - `IssueTriageAgent` identifies investigation areas, code search terms, and validation checks.
-- The runtime may execute `search_code`, `read_file`, `call_external_api`, and `run_command`.
+- The runtime may execute `search_code`, `read_file`, `call_external_api`, `run_command`, `git_status`, and `git_diff`.
 - `IssueAgent` produces the structured issue analysis.
 - `CriticAgent` validates the candidate output before completion.
 
 ### Bug Workflow
 
 - `BugTriageAgent` identifies hypotheses, code search terms, and API checks.
-- The runtime may execute `search_code`, `read_file`, `call_external_api`, and `run_command`.
+- The runtime may execute `search_code`, `read_file`, `call_external_api`, `run_command`, `git_status`, and `git_diff`.
 - `BugAgent` produces the structured bug diagnosis.
 - `CriticAgent` validates the candidate output before completion.
 
 ### PR Review Workflow
 
 - `PRTriageAgent` identifies review focus areas, code search terms, and regression checks.
-- The runtime may execute `search_code`, `read_file`, `call_external_api`, and `run_command`.
+- The runtime may execute `search_code`, `read_file`, `call_external_api`, `run_command`, `git_status`, and `git_diff`.
+- `git_status` and `git_diff` are especially useful here because they provide the real local change set and diff hunks alongside the user-provided PR summary.
 - `PRAgent` produces the structured PR review.
 - `CriticAgent` validates the candidate output before completion.
 
@@ -97,6 +99,7 @@ Each run contains:
 - relevant-memory summaries used during planning, replanning, and critique
 - tool call records with signatures, cache/suppression info, and results
 - command execution results with exit code, timeout status, duration, and truncated stdout/stderr
+- Git inspection results including working tree entries, changed files, and truncated diff previews
 - delegation records with target agent, depth, and output
 
 The API exposes this state through:
@@ -142,7 +145,7 @@ The project includes automated coverage for:
 
 - OpenAI response parsing and schema validation
 - runtime retries, timeouts, and metadata generation
-- tool execution and guardrails, including allowlisted command execution
+- tool execution and guardrails, including allowlisted command execution and Git inspection tools
 - workflow orchestration success and failure paths
 - HTTP handler behavior via the Express app factory
 

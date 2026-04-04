@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   CommandExecutionResult,
+  GitDiffResult,
+  GitStatusResult,
   WorkflowCommandName,
   WorkflowToolName,
   WorkflowToolRequest,
@@ -8,6 +10,7 @@ import {
 } from "../core/types";
 import { ApiResponse, callExternalApi } from "./externalApiTool";
 import { CodeSearchResult, searchCode } from "./codeSearchTool";
+import { getGitDiff, getGitStatus } from "./gitTool";
 import { FileReadResult, readFiles } from "./readFileTool";
 import { getAllowedCommandNames, isAllowedCommandName, runAllowedCommand } from "./runCommandTool";
 
@@ -21,6 +24,12 @@ const readFileInputSchema = z.object({
 
 const externalApiInputSchema = z.object({
   endpoint: z.string().trim().min(1),
+});
+
+const gitStatusInputSchema = z.object({});
+
+const gitDiffInputSchema = z.object({
+  staged: z.boolean().optional().default(false),
 });
 
 const runCommandInputSchema = z.object({
@@ -39,6 +48,8 @@ const toolSchemas = {
   read_file: readFileInputSchema,
   call_external_api: externalApiInputSchema,
   run_command: runCommandInputSchema,
+  git_status: gitStatusInputSchema,
+  git_diff: gitDiffInputSchema,
 } satisfies Record<WorkflowToolName, z.ZodTypeAny>;
 
 type ValidatedToolInputMap = {
@@ -46,6 +57,8 @@ type ValidatedToolInputMap = {
   read_file: z.infer<typeof readFileInputSchema>;
   call_external_api: z.infer<typeof externalApiInputSchema>;
   run_command: z.infer<typeof runCommandInputSchema>;
+  git_status: z.infer<typeof gitStatusInputSchema>;
+  git_diff: z.infer<typeof gitDiffInputSchema>;
 };
 
 function buildSearchCodeSummary(results: Record<string, CodeSearchResult[]>): string {
@@ -63,6 +76,14 @@ function buildExternalApiSummary(result: ApiResponse): string {
 
 function buildRunCommandSummary(result: CommandExecutionResult): string {
   return `command=${result.command},exitCode=${result.exitCode ?? "null"},timedOut=${result.timedOut}`;
+}
+
+function buildGitStatusSummary(result: GitStatusResult): string {
+  return `entries=${result.entries.length}`;
+}
+
+function buildGitDiffSummary(result: GitDiffResult): string {
+  return `files=${result.changedFiles.length},staged=${result.staged},truncated=${result.truncated}`;
 }
 
 export function getRegisteredToolNames(): WorkflowToolName[] {
@@ -108,6 +129,16 @@ export function buildWorkflowToolSignature(toolName: WorkflowToolName, input: un
     return `${toolName}:${parsed.command.trim().toLowerCase()}`;
   }
 
+  if (toolName === "git_status") {
+    gitStatusInputSchema.parse(input);
+    return "git_status:working_tree";
+  }
+
+  if (toolName === "git_diff") {
+    const parsed = gitDiffInputSchema.parse(input);
+    return `${toolName}:${parsed.staged ? "staged" : "working_tree"}`;
+  }
+
   const parsed = externalApiInputSchema.parse(input);
   return `${toolName}:${parsed.endpoint.trim().toLowerCase()}`;
 }
@@ -148,6 +179,30 @@ export async function executeWorkflowTool(request: WorkflowToolRequest): Promise
       summary: buildRunCommandSummary(data),
       data,
       signature: buildWorkflowToolSignature("run_command", parsed),
+    };
+  }
+
+  if (request.toolName === "git_status") {
+    const parsed = gitStatusInputSchema.parse(request.input);
+    const data = await getGitStatus();
+
+    return {
+      tool: "git_status",
+      summary: buildGitStatusSummary(data),
+      data,
+      signature: buildWorkflowToolSignature("git_status", parsed),
+    };
+  }
+
+  if (request.toolName === "git_diff") {
+    const parsed = gitDiffInputSchema.parse(request.input);
+    const data = await getGitDiff(parsed.staged);
+
+    return {
+      tool: "git_diff",
+      summary: buildGitDiffSummary(data),
+      data,
+      signature: buildWorkflowToolSignature("git_diff", parsed),
     };
   }
 

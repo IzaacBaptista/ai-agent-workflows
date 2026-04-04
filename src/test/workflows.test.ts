@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as llmClient from "../core/llmClient";
 import { WorkflowRuntime } from "../core/workflowRuntime";
+import { setGitToolExecutorForTesting } from "../tools/gitTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 import { runBugWorkflow } from "../workflows/bugWorkflow";
 import { runIssueWorkflow } from "../workflows/issueWorkflow";
@@ -406,6 +407,137 @@ test("runPRReviewWorkflow replanner guidance prefers run_command build for runti
     assert.ok(replannerSawRunCommandGuidance);
   } finally {
     setRunCommandExecutorForTesting();
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+  }
+});
+
+test("runPRReviewWorkflow can use git_status and git_diff as real repository context", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  let finalPromptIncludedGitContext = false;
+  const responses = [
+    buildLlmResponse({
+      summary: "Start with triage",
+      actions: [
+        {
+          type: "analyze",
+          stage: "triage",
+          task: "Map the risky local changes before reviewing them",
+          reason: "Need triage before using git tools",
+        },
+        {
+          type: "finalize",
+          task: "Produce the PR review with repository evidence",
+          reason: "Fallback finalization after gathering context",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "PR triage",
+      reviewFocus: ["runtime changes", "tooling changes"],
+      codeSearchTerms: ["workflowRuntime", "gitTool"],
+      regressionChecks: ["working tree matches expectations"],
+    }),
+    buildLlmResponse({
+      summary: "Check repository state first",
+      actions: [
+        {
+          type: "tool_call",
+          toolName: "git_status",
+          input: {},
+          reason: "Need the local change set before reviewing concrete hunks",
+        },
+        {
+          type: "finalize",
+          task: "Produce the PR review with repository evidence",
+          reason: "Fallback after git inspection",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Inspect concrete modified hunks",
+      actions: [
+        {
+          type: "tool_call",
+          toolName: "git_diff",
+          input: { staged: false },
+          reason: "Need concrete local hunks after seeing the changed files",
+        },
+        {
+          type: "finalize",
+          task: "Produce the PR review with repository evidence",
+          reason: "Enough context after git diff",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Finalize after git tools",
+      actions: [
+        {
+          type: "finalize",
+          task: "Produce the PR review with repository evidence",
+          reason: "Git status and diff are available",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "PR review from git context",
+      impacts: ["workflow runtime changed", "git tooling added"],
+      risks: ["working tree review may miss staged-only differences"],
+      suggestions: ["consider staged diff support in review prompts"],
+      testRecommendations: ["add coverage for git tool artifacts"],
+    }),
+    buildLlmResponse({
+      approved: true,
+      summary: "Approved with git evidence",
+      missingEvidence: [],
+      confidence: "high",
+    }),
+  ];
+
+  setGitToolExecutorForTesting({
+    getStatus: async () => ({
+      entries: [
+        { indexStatus: "M", workingTreeStatus: " ", path: "src/core/workflowRuntime.ts" },
+        { indexStatus: "?", workingTreeStatus: "?", path: "src/tools/gitTool.ts" },
+      ],
+      raw: "M  src/core/workflowRuntime.ts\n?? src/tools/gitTool.ts",
+    }),
+    getDiff: async (staged) => ({
+      staged,
+      diff: "diff --git a/src/core/workflowRuntime.ts b/src/core/workflowRuntime.ts\n+++ b/src/core/workflowRuntime.ts\n@@ -1,3 +1,4 @@",
+      changedFiles: ["src/core/workflowRuntime.ts"],
+      truncated: false,
+    }),
+  });
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async (prompt: string) => {
+    if (prompt.includes("Git status:") && prompt.includes("Git diff:")) {
+      finalPromptIncludedGitContext =
+        prompt.includes("src/core/workflowRuntime.ts") &&
+        prompt.includes("src/tools/gitTool.ts");
+    }
+
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const result = await runPRReviewWorkflow("Review the local runtime and tooling changes");
+
+    assert.equal(result.success, true);
+    if (!result.success) {
+      return;
+    }
+
+    assert.equal(result.data.summary, "PR review from git context");
+    assert.equal(result.meta.toolCallCount, 2);
+    assert.ok(finalPromptIncludedGitContext);
+  } finally {
+    setGitToolExecutorForTesting();
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
   }
 });

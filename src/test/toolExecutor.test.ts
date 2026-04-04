@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeWorkflowTool } from "../tools/toolExecutor";
+import { setGitToolExecutorForTesting } from "../tools/gitTool";
 import { readFiles } from "../tools/readFileTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 
@@ -85,6 +86,65 @@ test("toolExecutor executes lint through the allowlisted command runner", async 
     assert.equal(typeof result.data, "object");
   } finally {
     setRunCommandExecutorForTesting();
+  }
+});
+
+test("toolExecutor executes git_status through the git tool runner", async () => {
+  setGitToolExecutorForTesting({
+    getStatus: async () => ({
+      entries: [
+        { indexStatus: "M", workingTreeStatus: " ", path: "src/core/workflowRuntime.ts" },
+        { indexStatus: "?", workingTreeStatus: "?", path: "src/tools/gitTool.ts" },
+      ],
+      raw: "M  src/core/workflowRuntime.ts\n?? src/tools/gitTool.ts",
+    }),
+    getDiff: async () => ({
+      staged: false,
+      diff: "",
+      changedFiles: [],
+      truncated: false,
+    }),
+  });
+
+  try {
+    const result = await executeWorkflowTool({
+      toolName: "git_status",
+      input: {},
+    });
+
+    assert.equal(result.tool, "git_status");
+    assert.match(result.summary, /entries=2/);
+    assert.equal(typeof result.data, "object");
+  } finally {
+    setGitToolExecutorForTesting();
+  }
+});
+
+test("toolExecutor executes git_diff through the git tool runner", async () => {
+  setGitToolExecutorForTesting({
+    getStatus: async () => ({
+      entries: [],
+      raw: "",
+    }),
+    getDiff: async (staged) => ({
+      staged,
+      diff: "diff --git a/src/core/workflowRuntime.ts b/src/core/workflowRuntime.ts",
+      changedFiles: ["src/core/workflowRuntime.ts"],
+      truncated: false,
+    }),
+  });
+
+  try {
+    const result = await executeWorkflowTool({
+      toolName: "git_diff",
+      input: { staged: false },
+    });
+
+    assert.equal(result.tool, "git_diff");
+    assert.match(result.summary, /files=1/);
+    assert.equal(typeof result.data, "object");
+  } finally {
+    setGitToolExecutorForTesting();
   }
 });
 

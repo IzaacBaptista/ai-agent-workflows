@@ -81,6 +81,12 @@ EXTERNAL_API_TIMEOUT_MS=5000
 - In this repository, `lint` runs `tsc --noEmit`, so it acts as a fast static typecheck rather than a style linter.
 - The runtime captures exit code, timeout status, duration, and truncated stdout/stderr, then stores them in run artifacts for replanning and final analysis.
 
+### Git context tools
+
+- `git_status` exposes the local working tree status as structured entries.
+- `git_diff` exposes the current local diff, including changed files and a truncated diff preview.
+- These tools are especially useful in `PRReviewWorkflow`, where the model may need real repository context beyond the user-provided PR summary.
+
 ### File reading guardrails
 
 - `read_file` is limited to files inside `src/`.
@@ -167,6 +173,8 @@ All three workflows follow the same execution pattern:
    teaches planner, replanner, and critic to prefer `run_command` in bug and PR scenarios where executable build/test/lint evidence is more useful than additional code search or file reads.
 10. Command-memory feedback
    carries prior command outcomes like `build_failed`, `build_passed`, and `test_timed_out` into relevant memory so repeated command loops are avoided when the state has not materially changed.
+11. Git-aware PR context
+   allows the runtime to inspect `git_status` and `git_diff` so PR review can use the real local change set and modified hunks as evidence.
 
 ## Project structure
 
@@ -416,7 +424,7 @@ Returns the full persisted run record, including steps and status.
 
 #### GET `/runs/:runId/artifacts`
 
-Returns persisted artifacts such as plan, replans, critiques, context, tool calls, command results, and result.
+Returns persisted artifacts such as plan, replans, critiques, context, tool calls, command results, git status/diff artifacts, and result.
 
 ## Testing
 
@@ -430,7 +438,7 @@ The current suite covers:
 
 - resilient parsing of OpenAI Responses output in `BaseAgent`
 - workflow runtime retries, timeouts, and execution metadata
-- tool execution for `search_code`, `read_file`, `call_external_api`, and `run_command`
+- tool execution for `search_code`, `read_file`, `call_external_api`, `run_command`, `git_status`, and `git_diff`
 - workflow orchestration, critique-driven revision, and failure paths
 - HTTP endpoints and response envelopes through `createApp()`
 
