@@ -12,7 +12,13 @@ This project exposes three structured AI workflows:
 | `bug`   | Diagnoses a bug report and returns possible causes, investigation steps, fix suggestions, and associated risks. |
 | `pr`    | Reviews a pull request description and returns a summary of impacts, risks, code suggestions, and test recommendations. |
 
-Each workflow calls an LLM (OpenAI) using a structured prompt and validates the response with [Zod](https://zod.dev/) before returning it as formatted JSON.
+Each workflow now runs as a small multi-step pipeline:
+
+1. A triage agent turns the raw input into an investigation brief.
+2. The workflow searches the local codebase for related terms.
+3. The final agent produces the structured JSON output using the enriched context.
+
+Responses are generated through the OpenAI Responses API and validated with [Zod](https://zod.dev/) before being returned.
 
 ## Requirements
 
@@ -40,7 +46,15 @@ Edit `.env`:
 ```env
 OPENAI_API_KEY=your-openai-api-key-here
 MODEL=gpt-4o   # optional, defaults to gpt-5
+LOG_LEVEL=info
+LOG_FULL_PAYLOADS=false
 ```
+
+### Logging
+
+- `LOG_LEVEL` controls logger verbosity. Supported values: `debug`, `info`, `error`.
+- `LOG_FULL_PAYLOADS=true` enables truncated input/output previews in logs for local debugging.
+- By default, logs are structured and avoid printing full request and response payloads.
 
 ## Running workflows
 
@@ -98,21 +112,34 @@ npm run dev -- pr "Refactored auth middleware and updated token validation"
 }
 ```
 
+## How a workflow runs
+
+All three workflows follow the same execution pattern:
+
+1. Triage agent
+   turns the raw issue, bug, or PR into a short investigation brief.
+2. Code search
+   uses the triage output to search the local `src/` tree for related files and snippets.
+3. Final analysis agent
+   receives the original input plus the triage and code-search context, then returns validated JSON.
+4. Execution memory
+   stores run artifacts in an in-memory store for the lifetime of the current process.
+
 ## Project structure
 
 ```
 src/
 ├── index.ts              # CLI entrypoint
-├── agents/               # IssueAgent, BugAgent, PRAgent
+├── agents/               # Final analysis agents and triage agents per workflow
 ├── core/                 # BaseAgent, LLM client, shared types
 ├── config/               # Environment variable loading
 ├── helpers/              # loadPrompt, buildGitHubPRReviewInput, fetchGitHubPR, formatPRReviewComment
 ├── integrations/
 │   └── github/           # postPRComment (GitHub REST API write operations)
-├── memory/               # Simple in-memory key-value store
-├── tools/                # Logging, external API, code search
-└── workflows/            # runIssueWorkflow, runBugWorkflow, runPRReviewWorkflow
-prompts/                  # Markdown prompt templates per workflow
+├── memory/               # In-memory workflow artifact store
+├── tools/                # Structured logging, code search, external API hooks
+└── workflows/            # Multi-step workflow orchestration
+prompts/                  # Prompt templates for triage and final analysis
 ```
 
 ## HTTP API
@@ -283,4 +310,3 @@ npm run build
 ```
 
 Compiles TypeScript to `dist/`. To run the compiled API server: `npm run start:api`.
-
