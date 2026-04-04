@@ -34,3 +34,10 @@ export interface PRReview {
   suggestions: string[];
   testRecommendations: string[];
 }
+
+export interface PRTriage {
+  summary: string;
+  reviewFocus: string[];
+  codeSearchTerms: string[];
+  regressionChecks: string[];
+}
