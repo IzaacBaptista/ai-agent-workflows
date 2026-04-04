@@ -170,16 +170,18 @@ All three workflows follow the same execution pattern:
 ```
 src/
 ├── index.ts              # CLI entrypoint
-├── agents/               # Planner, replanner, critic, triage and final analysis agents
-├── core/                 # BaseAgent, action schemas, LLM client, workflow runtime, shared types
+├── server.ts             # Express API entrypoint and run inspection endpoints
+├── agents/               # Planner, replanner, critic, reviewer, triage/final agents, and agent registry
+├── core/                 # BaseAgent, action schemas, LLM client, workflow runtime, and shared types
 ├── config/               # Environment variable loading
-├── helpers/              # loadPrompt, memory context builders, GitHub helpers
+├── helpers/              # Prompt loading, memory/planning context builders, workflow guidance, and GitHub helpers
 ├── integrations/
 │   └── github/           # postPRComment (GitHub REST API write operations)
-├── memory/               # Run store, working memory, and relevant-memory retrieval
-├── tools/                # Structured logging, explicit workflow tools, allowlisted command execution, and tool registry/executor
-└── workflows/            # Runtime-driven workflow orchestration
-prompts/                  # Prompt templates for planner, replanner, critic, reviewer, triage and final analysis
+├── memory/               # Persisted run store, working memory snapshots, and relevant-memory retrieval
+├── test/                 # Runtime, workflow, tool, parser, and HTTP-layer tests
+├── tools/                # Structured logging, repository tools, allowlisted command execution, and tool registry/executor
+└── workflows/            # Runtime-driven workflow definitions for issue, bug, and PR review
+prompts/                  # Operational JSON-first prompts for planner, replanner, critic, reviewer, triage, and final analysis
 ```
 
 ## HTTP API
