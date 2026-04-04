@@ -77,7 +77,8 @@ EXTERNAL_API_TIMEOUT_MS=5000
 ### Command execution tool
 
 - `run_command` is an allowlisted workflow tool for local verification steps.
-- Supported commands are currently `build` and `test`.
+- Supported commands are currently `build`, `test`, and `lint`.
+- In this repository, `lint` runs `tsc --noEmit`, so it acts as a fast static typecheck rather than a style linter.
 - The runtime captures exit code, timeout status, duration, and truncated stdout/stderr, then stores them in run artifacts for replanning and final analysis.
 
 ### File reading guardrails
@@ -161,9 +162,9 @@ All three workflows follow the same execution pattern:
 7. Memory-aware planning
    feeds relevant prior runs and working memory back into planner, replanner, and critic.
 8. Controlled command execution
-   allows the model to request `run_command` for `build` or `test` when real project evidence is needed.
+   allows the model to request `run_command` for `build`, `test`, or `lint` when real project evidence is needed.
 9. Command-aware decision making
-   teaches planner, replanner, and critic to prefer `run_command` in bug and PR scenarios where executable build/test evidence is more useful than additional code search or file reads.
+   teaches planner, replanner, and critic to prefer `run_command` in bug and PR scenarios where executable build/test/lint evidence is more useful than additional code search or file reads.
 10. Command-memory feedback
    carries prior command outcomes like `build_failed`, `build_passed`, and `test_timed_out` into relevant memory so repeated command loops are avoided when the state has not materially changed.
 

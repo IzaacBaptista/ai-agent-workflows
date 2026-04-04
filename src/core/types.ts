@@ -2,7 +2,7 @@ export type WorkflowRunStatus = "running" | "completed" | "failed";
 export type WorkflowStepStatus = "running" | "completed" | "failed";
 export const WORKFLOW_TOOL_NAMES = ["search_code", "read_file", "call_external_api", "run_command"] as const;
 export type WorkflowToolName = typeof WORKFLOW_TOOL_NAMES[number];
-export type WorkflowCommandName = "build" | "test";
+export type WorkflowCommandName = "build" | "test" | "lint";
 export const REGISTERED_AGENT_NAMES = [
   "PlannerAgent",
   "ReplannerAgent",

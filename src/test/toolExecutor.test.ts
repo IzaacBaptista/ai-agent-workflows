@@ -63,6 +63,31 @@ test("toolExecutor executes run_command through the allowlisted command runner",
   }
 });
 
+test("toolExecutor executes lint through the allowlisted command runner", async () => {
+  setRunCommandExecutorForTesting(async (command) => ({
+    command,
+    exitCode: 0,
+    stdout: "lint ok",
+    stderr: "",
+    timedOut: false,
+    durationMs: 10,
+    signal: null,
+  }));
+
+  try {
+    const result = await executeWorkflowTool({
+      toolName: "run_command",
+      input: { command: "lint" },
+    });
+
+    assert.equal(result.tool, "run_command");
+    assert.match(result.summary, /command=lint/);
+    assert.equal(typeof result.data, "object");
+  } finally {
+    setRunCommandExecutorForTesting();
+  }
+});
+
 test("readFiles rejects paths outside allowed scope", () => {
   assert.throws(
     () => readFiles(["README.md"]),

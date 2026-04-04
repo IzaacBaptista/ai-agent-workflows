@@ -576,8 +576,8 @@ test("runPRReviewWorkflow critic guidance can redirect to run_command when execu
   (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async (prompt: string) => {
     if (prompt.includes("You are a critic agent")) {
       criticSawRunCommandGuidance =
-        prompt.includes("prefer redirecting to `run_command` with `build` or `test`") &&
-        prompt.includes("Allowed run_command commands: build, test");
+        prompt.includes("prefer redirecting to `run_command` with `build`, `test`, or `lint`") &&
+        prompt.includes("Allowed run_command commands: build, test, lint");
     }
 
     const next = responses.shift();

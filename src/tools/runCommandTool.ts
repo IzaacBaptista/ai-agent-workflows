@@ -20,6 +20,11 @@ const allowedCommands: Record<WorkflowCommandName, AllowedCommandSpec> = {
     args: ["run", "test"],
     timeoutMs: 55_000,
   },
+  lint: {
+    command: "npm",
+    args: ["run", "lint"],
+    timeoutMs: 25_000,
+  },
 };
 
 type RunCommandExecutor = (commandName: WorkflowCommandName) => Promise<CommandExecutionResult>;

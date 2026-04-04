@@ -36,7 +36,7 @@ Tools execute concrete actions:
 - structured logging
 - local code search
 - direct file reads with scope restrictions (`src/` and approved extensions only)
-- allowlisted command execution for local verification (`build` and `test`)
+- allowlisted command execution for local verification (`build`, `test`, and `lint`; here `lint` is `tsc --noEmit`)
 - external API calls
 - tool execution dispatch
 - GitHub comment posting for PR review flows
