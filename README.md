@@ -12,11 +12,13 @@ This project exposes three structured AI workflows:
 | `bug`   | Diagnoses a bug report and returns possible causes, investigation steps, fix suggestions, and associated risks. |
 | `pr`    | Reviews a pull request description and returns a summary of impacts, risks, code suggestions, and test recommendations. |
 
-Each workflow now runs as a small multi-step pipeline:
+Each workflow now runs as a multi-agent execution loop:
 
-1. A triage agent turns the raw input into an investigation brief.
-2. The workflow searches the local codebase for related terms.
-3. The final agent produces the structured JSON output using the enriched context.
+1. A planner proposes the next actions.
+2. A specialist or tool step executes.
+3. A replanner can adjust the remaining actions based on run state.
+4. A final analysis agent produces a candidate result.
+5. A critic agent can approve the result or force one more revision cycle.
 
 Responses are generated through the OpenAI Responses API and validated with [Zod](https://zod.dev/) before being returned.
 
@@ -48,6 +50,9 @@ OPENAI_API_KEY=your-openai-api-key-here
 MODEL=gpt-4o   # optional, defaults to gpt-5
 LOG_LEVEL=info
 LOG_FULL_PAYLOADS=false
+RUN_STORAGE_DIR=.runs
+EXTERNAL_API_BASE_URL=
+EXTERNAL_API_TIMEOUT_MS=5000
 ```
 
 ### Logging
@@ -55,6 +60,16 @@ LOG_FULL_PAYLOADS=false
 - `LOG_LEVEL` controls logger verbosity. Supported values: `debug`, `info`, `error`.
 - `LOG_FULL_PAYLOADS=true` enables truncated input/output previews in logs for local debugging.
 - By default, logs are structured and avoid printing full request and response payloads.
+
+### Runtime storage
+
+- `RUN_STORAGE_DIR` defines where workflow runs are persisted as JSON.
+- Run state is loaded back when the process starts.
+
+### External API tool
+
+- `EXTERNAL_API_BASE_URL` is used by the `call_external_api` workflow tool for relative endpoints.
+- `EXTERNAL_API_TIMEOUT_MS` controls timeout for those external checks.
 
 ## Running workflows
 
@@ -116,30 +131,32 @@ npm run dev -- pr "Refactored auth middleware and updated token validation"
 
 All three workflows follow the same execution pattern:
 
-1. Triage agent
-   turns the raw issue, bug, or PR into a short investigation brief.
-2. Code search
-   uses the triage output to search the local `src/` tree for related files and snippets.
-3. Final analysis agent
-   receives the original input plus the triage and code-search context, then returns validated JSON.
-4. Execution memory
-   stores run artifacts in an in-memory store for the lifetime of the current process.
+1. Planning
+   creates an initial action sequence such as `triage -> search_code -> read_file -> final_analysis`.
+2. Execution
+   runs explicit tool and agent steps under an execution policy with retries and timeouts.
+3. Replanning
+   revises the remaining steps after important state changes.
+4. Critique
+   reviews the candidate result and can request one more focused revision.
+5. Persistence
+   stores steps, artifacts, replans, and critiques in persisted run records.
 
 ## Project structure
 
 ```
 src/
 ├── index.ts              # CLI entrypoint
-├── agents/               # Final analysis agents and triage agents per workflow
-├── core/                 # BaseAgent, LLM client, shared types
+├── agents/               # Planner, replanner, critic, triage and final analysis agents
+├── core/                 # BaseAgent, LLM client, workflow runtime, shared types
 ├── config/               # Environment variable loading
 ├── helpers/              # loadPrompt, buildGitHubPRReviewInput, fetchGitHubPR, formatPRReviewComment
 ├── integrations/
 │   └── github/           # postPRComment (GitHub REST API write operations)
-├── memory/               # In-memory workflow artifact store
-├── tools/                # Structured logging, code search, external API hooks
-└── workflows/            # Multi-step workflow orchestration
-prompts/                  # Prompt templates for triage and final analysis
+├── memory/               # Run store with in-memory cache and JSON persistence
+├── tools/                # Structured logging, explicit workflow tools and executors
+└── workflows/            # Runtime-driven workflow orchestration
+prompts/                  # Prompt templates for planner, replanner, critic, triage and final analysis
 ```
 
 ## HTTP API
@@ -177,7 +194,15 @@ curl -X POST http://localhost:3000/issue/analyze \
 ```json
 {
   "success": true,
-  "data": { "summary": "...", "technicalPlan": ["..."], ... }
+  "data": { "summary": "...", "technicalPlan": ["..."], ... },
+  "meta": {
+    "runId": "IssueWorkflow:...",
+    "workflowName": "IssueWorkflow",
+    "status": "completed",
+    "stepCount": 8,
+    "critiqueCount": 1,
+    "replanCount": 2
+  }
 }
 ```
 
@@ -192,7 +217,15 @@ curl -X POST http://localhost:3000/bug/analyze \
 ```json
 {
   "success": true,
-  "data": { "diagnosis": "...", "possibleCauses": ["..."], ... }
+  "data": { "summary": "...", "possibleCauses": ["..."], ... },
+  "meta": {
+    "runId": "BugWorkflow:...",
+    "workflowName": "BugWorkflow",
+    "status": "completed",
+    "stepCount": 9,
+    "critiqueCount": 1,
+    "replanCount": 2
+  }
 }
 ```
 
@@ -207,7 +240,15 @@ curl -X POST http://localhost:3000/pr/review \
 ```json
 {
   "success": true,
-  "data": { "summary": "...", "risks": ["..."], ... }
+  "data": { "summary": "...", "risks": ["..."], ... },
+  "meta": {
+    "runId": "PRReviewWorkflow:...",
+    "workflowName": "PRReviewWorkflow",
+    "status": "completed",
+    "stepCount": 9,
+    "critiqueCount": 1,
+    "replanCount": 2
+  }
 }
 ```
 
@@ -230,7 +271,15 @@ curl -X POST http://localhost:3000/github/pr-review \
 ```json
 {
   "success": true,
-  "data": { "summary": "...", "risks": ["..."], ... }
+  "data": { "summary": "...", "risks": ["..."], ... },
+  "meta": {
+    "runId": "PRReviewWorkflow:...",
+    "workflowName": "PRReviewWorkflow",
+    "status": "completed",
+    "stepCount": 9,
+    "critiqueCount": 1,
+    "replanCount": 2
+  }
 }
 ```
 
@@ -251,7 +300,15 @@ curl -X POST http://localhost:3000/github/pr-review/fetch \
 ```json
 {
   "success": true,
-  "data": { "summary": "...", "risks": ["..."], ... }
+  "data": { "summary": "...", "risks": ["..."], ... },
+  "meta": {
+    "runId": "PRReviewWorkflow:...",
+    "workflowName": "PRReviewWorkflow",
+    "status": "completed",
+    "stepCount": 9,
+    "critiqueCount": 1,
+    "replanCount": 2
+  }
 }
 ```
 
@@ -286,6 +343,18 @@ If the review succeeds but posting the comment fails (e.g. invalid token or insu
   "meta": { "commentPosted": false, "commentError": "Request failed with status code 403" }
 }
 ```
+
+#### GET `/runs`
+
+Lists persisted workflow runs with summary metadata.
+
+#### GET `/runs/:runId`
+
+Returns the full persisted run record, including steps and status.
+
+#### GET `/runs/:runId/artifacts`
+
+Returns persisted artifacts such as plan, replans, critiques, context, and result.
 
 ### Error responses
 
