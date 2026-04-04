@@ -240,6 +240,34 @@ test("WorkflowRuntime safely replans after an invalid tool request", async () =>
   assert.equal((runtime.getRunRecord().artifacts.validationErrors as unknown[]).length, 1);
 });
 
+test("WorkflowRuntime records a single planner validation error when invalid planner output is retried", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "RuntimeInvalidPlannerWorkflow",
+    input: "invalid planner output",
+    policy: {
+      maxSteps: 6,
+      maxRetriesPerStep: 1,
+      timeoutMs: 1000,
+    },
+  });
+
+  const definition = createDefinition({
+    workflowName: "RuntimeInvalidPlannerWorkflow",
+    runPlanner: async () => {
+      throw new Error("LLM response failed schema validation: invalid planner output");
+    },
+  });
+
+  await assert.rejects(
+    () => runtime.runActionQueue(definition, "invalid planner output"),
+    /invalid planner output/,
+  );
+
+  const validationErrors = runtime.getRunRecord().artifacts.validationErrors as Array<{ kind: string }>;
+  assert.equal(validationErrors.length, 1);
+  assert.equal(validationErrors[0]?.kind, "planner");
+});
+
 test("WorkflowRuntime executes run_command and persists command results for later analysis", async () => {
   setRunCommandExecutorForTesting(async (command) => ({
     command,

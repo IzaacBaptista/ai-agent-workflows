@@ -440,13 +440,24 @@ Run the higher-level runtime eval harness with:
 npm run evals
 ```
 
+List available scenarios or run one scenario only:
+
+```bash
+npm run evals -- --list
+npm run evals -- --scenario pr-uses-git-context-tools
+```
+
 The eval harness uses isolated `.eval-runs` storage and checks scenario-level behavior such as:
 
 - preferring `run_command(test)` in bug investigation
+- choosing between `lint`, `build`, and `test` based on workflow context
 - using `git_status` and `git_diff` in PR review
+- using staged Git diff context when that is the relevant review surface
 - suppressing repeated identical tool calls
+- forcing finalization on no-progress repository searches
 - critic-driven redirection to executable evidence
 - planner decisions influenced by relevant memory
+- safe failure when planner output violates the supported tool contract
 
 The current suite covers:
 

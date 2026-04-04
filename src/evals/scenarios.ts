@@ -1,6 +1,7 @@
 import { WorkflowRuntime } from "../core/workflowRuntime";
 import {
   CommandExecutionResult,
+  WorkflowValidationError,
   WorkflowResult,
   WorkflowRunRecord,
   WorkflowToolCallRecord,
@@ -55,6 +56,14 @@ function getCommandResults(run: WorkflowRunRecord): CommandExecutionResult[] {
 function promptIncludes(context: EvalExecutionContext, needle: string): boolean {
   return context.prompts.some((prompt) => prompt.includes(needle));
 }
+
+function getValidationErrors(run: WorkflowRunRecord): WorkflowValidationError[] {
+  return Array.isArray(run.artifacts.validationErrors)
+    ? (run.artifacts.validationErrors as WorkflowValidationError[])
+    : [];
+}
+
+const missingSearchTerm = ["zzzzeval", "missing", "symbol", "k91x"].join("_");
 
 export function getEvalScenarios(): EvalScenario[] {
   return [
@@ -140,6 +149,164 @@ export function getEvalScenarios(): EvalScenario[] {
             label: "test command result was persisted",
             passed: commandResults.length === 1 && commandResults[0]?.command === "test",
             details: `commandResults=${commandResults.length}`,
+          },
+        ];
+      },
+    },
+    {
+      id: "pr-prefers-run-command-build",
+      description: "PR workflow chooses run_command(build) for core runtime and type changes.",
+      workflow: "pr",
+      input: "Refactored WorkflowRuntime, action schemas, and core types used by the PR review flow",
+      setup: () => {
+        setRunCommandExecutorForTesting(async (command) => ({
+          command,
+          exitCode: 0,
+          stdout: "build ok",
+          stderr: "",
+          timedOut: false,
+          durationMs: 31,
+          signal: null,
+        }));
+      },
+      mockResponses: [
+        buildLlmResponse({
+          summary: "Use build evidence first",
+          actions: [
+            {
+              type: "tool_call",
+              toolName: "run_command",
+              input: { command: "build" },
+              reason: "Core runtime and type changes should be validated with a build",
+            },
+            {
+              type: "finalize",
+              task: "Produce the PR review with build evidence",
+              reason: "The build result should narrow the conclusion",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "Finalize after build",
+          actions: [
+            {
+              type: "finalize",
+              task: "Produce the PR review with build evidence",
+              reason: "Build verification already ran",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "PR review from build evidence",
+          impacts: ["Runtime and type changes compile successfully"],
+          risks: ["Behavioral coverage still depends on tests"],
+          suggestions: ["Pair the build with targeted regression tests when behavior changes"],
+          testRecommendations: ["Run the full test suite for runtime-sensitive diffs"],
+        }),
+        buildLlmResponse({
+          approved: true,
+          summary: "Build evidence is sufficient for this review",
+          missingEvidence: [],
+          confidence: "high",
+        }),
+      ],
+      evaluate: (result, run, context) => {
+        const commandResults = getCommandResults(run);
+
+        return [
+          {
+            label: "workflow completes successfully",
+            passed: result.success,
+            details: result.success ? result.meta.runId : result.error,
+          },
+          {
+            label: "planner saw build-oriented PR guidance",
+            passed:
+              promptIncludes(context, "In PRReviewWorkflow, prefer `run_command` with `build`") &&
+              promptIncludes(context, "Allowed run_command commands: build, test, lint"),
+          },
+          {
+            label: "build command was executed once",
+            passed: result.meta.toolCallCount === 1 && commandResults[0]?.command === "build",
+            details: `toolCallCount=${result.meta.toolCallCount}`,
+          },
+        ];
+      },
+    },
+    {
+      id: "pr-prefers-run-command-lint",
+      description: "PR workflow chooses run_command(lint) for narrow static contract changes.",
+      workflow: "pr",
+      input: "Normalized RuntimeAction names and tightened core type contracts without changing behavior",
+      setup: () => {
+        setRunCommandExecutorForTesting(async (command) => ({
+          command,
+          exitCode: 0,
+          stdout: "typecheck ok",
+          stderr: "",
+          timedOut: false,
+          durationMs: 19,
+          signal: null,
+        }));
+      },
+      mockResponses: [
+        buildLlmResponse({
+          summary: "Use lint for static verification",
+          actions: [
+            {
+              type: "tool_call",
+              toolName: "run_command",
+              input: { command: "lint" },
+              reason: "This looks like a narrow static contract change",
+            },
+            {
+              type: "finalize",
+              task: "Produce the PR review with static verification evidence",
+              reason: "Lint should be the narrowest useful proof here",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "Finalize after lint",
+          actions: [
+            {
+              type: "finalize",
+              task: "Produce the PR review with static verification evidence",
+              reason: "Static verification already ran",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "PR review from lint evidence",
+          impacts: ["Static contracts remain type-safe"],
+          risks: ["Behavioral regressions still need runtime-focused checks"],
+          suggestions: ["Use lint for narrow schema/type refactors before escalating to build"],
+          testRecommendations: ["Run build or test only if runtime behavior also changed"],
+        }),
+        buildLlmResponse({
+          approved: true,
+          summary: "Static verification is sufficient",
+          missingEvidence: [],
+          confidence: "high",
+        }),
+      ],
+      evaluate: (result, run, context) => {
+        const commandResults = getCommandResults(run);
+
+        return [
+          {
+            label: "workflow completes successfully",
+            passed: result.success,
+            details: result.success ? result.meta.runId : result.error,
+          },
+          {
+            label: "planner saw lint-oriented PR guidance",
+            passed: promptIncludes(context, "prefer `run_command` with `lint`"),
+          },
+          {
+            label: "lint command was executed once",
+            passed: result.meta.toolCallCount === 1 && commandResults[0]?.command === "lint",
+            details: `toolCallCount=${result.meta.toolCallCount}`,
           },
         ];
       },
@@ -258,6 +425,95 @@ export function getEvalScenarios(): EvalScenario[] {
       },
     },
     {
+      id: "pr-uses-staged-git-diff",
+      description: "PR workflow can request staged git diff context when the staged change set is the relevant evidence.",
+      workflow: "pr",
+      input: "Review the currently staged PR changes before commit",
+      setup: () => {
+        setGitToolExecutorForTesting({
+          async getStatus() {
+            return {
+              entries: [],
+              raw: "",
+            };
+          },
+          async getDiff(staged) {
+            return {
+              staged,
+              changedFiles: ["src/core/types.ts"],
+              diff: "diff --git a/src/core/types.ts b/src/core/types.ts",
+              truncated: false,
+            };
+          },
+        });
+      },
+      mockResponses: [
+        buildLlmResponse({
+          summary: "Use staged diff directly",
+          actions: [
+            {
+              type: "tool_call",
+              toolName: "git_diff",
+              input: { staged: true },
+              reason: "The staged diff is the exact review surface right now",
+            },
+            {
+              type: "finalize",
+              task: "Produce the PR review from staged diff evidence",
+              reason: "The staged diff should be enough for a first review pass",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "Finalize after staged diff",
+          actions: [
+            {
+              type: "finalize",
+              task: "Produce the PR review from staged diff evidence",
+              reason: "The staged diff is already available",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "PR review from staged diff",
+          impacts: ["The staged type contract changes are visible"],
+          risks: ["Unstaged local changes are not part of this review"],
+          suggestions: ["Keep the staged diff small and reviewable"],
+          testRecommendations: ["Run the eval harness against staged changes before commit"],
+        }),
+        buildLlmResponse({
+          approved: true,
+          summary: "Staged diff evidence is sufficient",
+          missingEvidence: [],
+          confidence: "high",
+        }),
+      ],
+      evaluate: (result, run, context) => {
+        const finalContext = typeof run.artifacts.context === "string" ? run.artifacts.context : "";
+        const gitDiffResult = run.artifacts.gitDiffResult as { staged?: boolean } | undefined;
+
+        return [
+          {
+            label: "workflow completes successfully",
+            passed: result.success,
+            details: result.success ? result.meta.runId : result.error,
+          },
+          {
+            label: "prompt included git diff guidance",
+            passed: promptIncludes(context, "Use `tool_call` with `git_status` or `git_diff`"),
+          },
+          {
+            label: "staged git diff was persisted and surfaced",
+            passed:
+              result.meta.toolCallCount === 1 &&
+              gitDiffResult?.staged === true &&
+              finalContext.includes("staged=true"),
+            details: `toolCallCount=${result.meta.toolCallCount}`,
+          },
+        ];
+      },
+    },
+    {
       id: "duplicate-tool-call-is-suppressed",
       description: "Repeated identical run_command calls are suppressed instead of re-executed.",
       workflow: "issue",
@@ -344,6 +600,72 @@ export function getEvalScenarios(): EvalScenario[] {
               toolCalls[1]?.toolName === "run_command" &&
               toolCalls[1]?.suppressed === true &&
               toolCalls[1]?.cached === true,
+          },
+        ];
+      },
+    },
+    {
+      id: "issue-empty-search-forces-finalization",
+      description: "Issue workflow forces finalization when search_code returns no progress.",
+      workflow: "issue",
+      input: "Investigate a missing repository symbol that should not trigger a search loop",
+      mockResponses: [
+        buildLlmResponse({
+          summary: "Search once before concluding",
+          actions: [
+            {
+              type: "tool_call",
+              toolName: "search_code",
+              input: { terms: [missingSearchTerm] },
+              reason: "Need to confirm whether the symbol exists in the repository",
+            },
+            {
+              type: "finalize",
+              task: "Produce the issue analysis after the search result",
+              reason: "Finalize after the repository check",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "Issue analysis after empty search",
+          questions: ["Should missing search results immediately force a conclusion?"],
+          acceptanceCriteria: ["The runtime avoids a no-progress search loop"],
+          technicalPlan: ["Surface the empty search result and conclude"],
+          testScenarios: ["Search for a term with zero repository matches"],
+          risks: ["Forcing finalization too early can skip a better alternate tool"],
+          assumptions: ["The missing term truly has no code matches"],
+        }),
+        buildLlmResponse({
+          approved: true,
+          summary: "The forced finalization path is acceptable",
+          missingEvidence: [],
+          confidence: "high",
+        }),
+      ],
+      evaluate: (result, run) => {
+        const forcedReason =
+          typeof run.artifacts.forcedFinalAnalysisReason === "string"
+            ? run.artifacts.forcedFinalAnalysisReason
+            : "";
+        const codeSearchResults = run.artifacts.codeSearchResults as Record<string, unknown[]> | undefined;
+
+        return [
+          {
+            label: "workflow completes successfully",
+            passed: result.success,
+            details: result.success ? result.meta.runId : result.error,
+          },
+          {
+            label: "empty search triggered forced finalization without replanning",
+            passed:
+              result.meta.toolCallCount === 1 &&
+              result.meta.replanCount === 0 &&
+              forcedReason.includes('No progress after tool_call "search_code"'),
+            details: `toolCallCount=${result.meta.toolCallCount}, replanCount=${result.meta.replanCount}`,
+          },
+          {
+            label: "empty search result was persisted",
+            passed: Array.isArray(codeSearchResults?.[missingSearchTerm]) && codeSearchResults?.[missingSearchTerm]?.length === 0,
           },
         ];
       },
@@ -439,6 +761,70 @@ export function getEvalScenarios(): EvalScenario[] {
             label: "critic redirect led to an executable command",
             passed: result.meta.toolCallCount === 1 && commandResults[0]?.command === "test",
             details: `toolCallCount=${result.meta.toolCallCount}`,
+          },
+        ];
+      },
+    },
+    {
+      id: "planner-invalid-tool-fails-fast",
+      description: "Workflow fails safely when the planner repeatedly emits an unsupported tool.",
+      workflow: "issue",
+      input: "Trigger an invalid planner output for evaluation",
+      mockResponses: [
+        buildLlmResponse({
+          summary: "Invalid plan attempt one",
+          actions: [
+            {
+              type: "tool_call",
+              toolName: "totally_unknown_tool",
+              input: {},
+              reason: "invalid tool name for eval",
+            },
+            {
+              type: "finalize",
+              task: "This should never execute",
+              reason: "invalid",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "Invalid plan attempt two",
+          actions: [
+            {
+              type: "tool_call",
+              toolName: "totally_unknown_tool",
+              input: {},
+              reason: "invalid tool name for eval",
+            },
+            {
+              type: "finalize",
+              task: "This should never execute",
+              reason: "invalid",
+            },
+          ],
+        }),
+      ],
+      evaluate: (result, run) => {
+        const validationErrors = getValidationErrors(run);
+
+        return [
+          {
+            label: "workflow fails safely",
+            passed: !result.success,
+            details: result.success ? "unexpected success" : result.error,
+          },
+          {
+            label: "no tool calls were executed",
+            passed: result.meta.toolCallCount === 0,
+            details: `toolCallCount=${result.meta.toolCallCount}`,
+          },
+          {
+            label: "planner validation error was recorded once",
+            passed:
+              validationErrors.length === 1 &&
+              validationErrors[0]?.kind === "planner" &&
+              validationErrors[0]?.message.includes("schema validation"),
+            details: `validationErrors=${validationErrors.length}`,
           },
         ];
       },

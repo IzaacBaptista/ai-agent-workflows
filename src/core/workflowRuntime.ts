@@ -348,12 +348,14 @@ export class WorkflowRuntime {
       (entry) => entry.kind === kind && entry.signature === signature && entry.message === message,
     );
 
-    this.appendArtifactArray("validationErrors", {
-      kind,
-      message,
-      signature,
-      createdAt: new Date().toISOString(),
-    } satisfies WorkflowValidationError);
+    if (!duplicate) {
+      this.appendArtifactArray("validationErrors", {
+        kind,
+        message,
+        signature,
+        createdAt: new Date().toISOString(),
+      } satisfies WorkflowValidationError);
+    }
 
     return duplicate;
   }
@@ -714,13 +716,20 @@ export class WorkflowRuntime {
       (
         await this.executeStep(
           "replan",
-          async () =>
-            definition.runReplanner(
-              context,
-              memoryContext,
-              getRegisteredToolNames(),
-              getDelegatableAgentNames(),
-            ),
+          async () => {
+            try {
+              return await definition.runReplanner(
+                context,
+                memoryContext,
+                getRegisteredToolNames(),
+                getDelegatableAgentNames(),
+              );
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              this.recordValidationError("replanner", message, "replanner");
+              throw error;
+            }
+          },
           {
             agentName: "ReplannerAgent",
             inputSummary: context,
@@ -757,13 +766,20 @@ export class WorkflowRuntime {
 
     const critique = await this.executeStep(
       "critique",
-      async () =>
-        definition.runCritic(
-          critiqueContext,
-          state.candidateResult as TResult,
-          workingMemory,
-          memoryContext,
-        ),
+      async () => {
+        try {
+          return await definition.runCritic(
+            critiqueContext,
+            state.candidateResult as TResult,
+            workingMemory,
+            memoryContext,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.recordValidationError("critic", message, "critic");
+          throw error;
+        }
+      },
       {
         agentName: "CriticAgent",
         inputSummary: task,
@@ -966,13 +982,20 @@ export class WorkflowRuntime {
     const memoryContext = this.buildMemoryContext(input, "planner");
     const plan = await this.executeStep(
       "plan",
-      async () =>
-        definition.runPlanner(
-          input,
-          memoryContext,
-          getRegisteredToolNames(),
-          getDelegatableAgentNames(),
-        ),
+      async () => {
+        try {
+          return await definition.runPlanner(
+            input,
+            memoryContext,
+            getRegisteredToolNames(),
+            getDelegatableAgentNames(),
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.recordValidationError("planner", message, "planner");
+          throw error;
+        }
+      },
       {
         agentName: "PlannerAgent",
         inputSummary: input,
