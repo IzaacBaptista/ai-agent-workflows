@@ -129,6 +129,7 @@ test("WorkflowRuntime allows critique immediately after finalize at the maxSteps
   assert.equal(runtime.getMeta().critiqueCount, 1);
   assert.equal(runtime.getMeta().stepCount, 3);
   const steps = runtime.getRunRecord().steps;
+  assert.equal(steps[0]?.actionType, "plan");
   assert.equal(steps[steps.length - 1]?.name, "critique");
 });
 

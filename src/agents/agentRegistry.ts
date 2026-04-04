@@ -8,7 +8,7 @@ import { PRAgent } from "./prAgent";
 import { PRTriageAgent } from "./prTriageAgent";
 import { ReplannerAgent } from "./replannerAgent";
 import { ReviewerAgent } from "./reviewerAgent";
-import { RegisteredAgentName } from "../core/types";
+import { REGISTERED_AGENT_NAMES, RegisteredAgentName } from "../core/types";
 
 interface RunnableAgent {
   run(input: string): Promise<unknown>;
@@ -30,7 +30,7 @@ const agentFactories: Record<RegisteredAgentName, AgentFactory> = {
 };
 
 export function getDelegatableAgentNames(): RegisteredAgentName[] {
-  return Object.keys(agentFactories) as RegisteredAgentName[];
+  return [...REGISTERED_AGENT_NAMES];
 }
 
 export function isRegisteredAgentName(value: string): value is RegisteredAgentName {

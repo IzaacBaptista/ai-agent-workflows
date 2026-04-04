@@ -960,7 +960,7 @@ export class WorkflowRuntime {
         inputSummary: input,
         outputSummary: (value) =>
           `actions=${(value as WorkflowPlan).actions.map((action) => action.type).join(",")}`,
-        actionType: "replan",
+        actionType: "plan",
       },
     );
 

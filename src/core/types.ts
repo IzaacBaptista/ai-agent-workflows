@@ -1,19 +1,23 @@
 export type WorkflowRunStatus = "running" | "completed" | "failed";
 export type WorkflowStepStatus = "running" | "completed" | "failed";
-export type WorkflowToolName = "search_code" | "read_file" | "call_external_api" | "run_command";
+export const WORKFLOW_TOOL_NAMES = ["search_code", "read_file", "call_external_api", "run_command"] as const;
+export type WorkflowToolName = typeof WORKFLOW_TOOL_NAMES[number];
 export type WorkflowCommandName = "build" | "test";
-export type RegisteredAgentName =
-  | "PlannerAgent"
-  | "ReplannerAgent"
-  | "CriticAgent"
-  | "ReviewerAgent"
-  | "IssueTriageAgent"
-  | "BugTriageAgent"
-  | "PRTriageAgent"
-  | "IssueAgent"
-  | "BugAgent"
-  | "PRAgent";
+export const REGISTERED_AGENT_NAMES = [
+  "PlannerAgent",
+  "ReplannerAgent",
+  "CriticAgent",
+  "ReviewerAgent",
+  "IssueTriageAgent",
+  "BugTriageAgent",
+  "PRTriageAgent",
+  "IssueAgent",
+  "BugAgent",
+  "PRAgent",
+] as const;
+export type RegisteredAgentName = typeof REGISTERED_AGENT_NAMES[number];
 export type RuntimeActionType =
+  | "plan"
   | "analyze"
   | "tool_call"
   | "delegate"

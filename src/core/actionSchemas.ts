@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+  REGISTERED_AGENT_NAMES,
   ReviewerAssessment,
   RuntimeAction,
+  WORKFLOW_TOOL_NAMES,
   WorkflowCritique,
   WorkflowPlan,
   WorkflowReplan,
@@ -17,13 +19,13 @@ export const runtimeActionSchema: z.ZodType<RuntimeAction> = z.lazy(() =>
     }),
     z.object({
       type: z.literal("tool_call"),
-      toolName: z.string(),
+      toolName: z.enum(WORKFLOW_TOOL_NAMES),
       input: z.unknown(),
       reason: z.string(),
     }),
     z.object({
       type: z.literal("delegate"),
-      targetAgent: z.string(),
+      targetAgent: z.enum(REGISTERED_AGENT_NAMES),
       task: z.string(),
       reason: z.string(),
     }),
