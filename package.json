@@ -6,6 +6,7 @@
     "dev": "ts-node src/index.ts",
     "dev:api": "ts-node src/server.ts",
     "build": "tsc",
+    "test": "npm run build && node --test dist/test/**/*.test.js",
     "start:api": "node dist/server.js"
   },
   "dependencies": {

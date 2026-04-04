@@ -330,17 +330,36 @@ curl -X POST http://localhost:3000/github/pr-review/comment \
 {
   "success": true,
   "data": { "summary": "...", "risks": ["..."], ... },
-  "meta": { "commentPosted": true }
+  "meta": {
+    "runId": "PRReviewWorkflow:...",
+    "workflowName": "PRReviewWorkflow",
+    "status": "completed",
+    "stepCount": 9,
+    "critiqueCount": 1,
+    "replanCount": 2,
+    "githubComment": { "posted": true }
+  }
 }
 ```
 
-If the review succeeds but posting the comment fails (e.g. invalid token or insufficient permissions), the analysis is still returned with `meta.commentPosted` set to `false`:
+If the review succeeds but posting the comment fails, the workflow metadata is still preserved and the GitHub posting result is attached under `meta.githubComment`:
 
 ```json
 {
   "success": true,
   "data": { "summary": "...", "risks": ["..."], ... },
-  "meta": { "commentPosted": false, "commentError": "Request failed with status code 403" }
+  "meta": {
+    "runId": "PRReviewWorkflow:...",
+    "workflowName": "PRReviewWorkflow",
+    "status": "completed",
+    "stepCount": 9,
+    "critiqueCount": 1,
+    "replanCount": 2,
+    "githubComment": {
+      "posted": false,
+      "error": "Request failed with status code 403"
+    }
+  }
 }
 ```
 

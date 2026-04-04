@@ -47,6 +47,10 @@ export interface WorkflowExecutionMeta {
   stepCount: number;
   critiqueCount: number;
   replanCount: number;
+  githubComment?: {
+    posted: boolean;
+    error?: string;
+  };
 }
 
 export type WorkflowResult<T> =

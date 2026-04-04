@@ -146,12 +146,22 @@ export class WorkflowRuntime {
       logWorkflowStep(this.workflowName, stepRecord);
 
       try {
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<T>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error(`Step "${name}" timed out`)),
+            this.policy.timeoutMs,
+          );
+        });
+
         const result = await Promise.race<T>([
           executor(),
-          new Promise<T>((_, reject) => {
-            setTimeout(() => reject(new Error(`Step "${name}" timed out`)), this.policy.timeoutMs);
-          }),
+          timeoutPromise,
         ]);
+
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
 
         const completedStep: Partial<WorkflowStepRecord> = {
           status: "completed",

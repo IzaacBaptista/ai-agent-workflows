@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import {
   WorkflowExecutionPolicy,
@@ -31,6 +31,35 @@ function getRunFilePath(runId: string): string {
 function persistRun(run: WorkflowRunRecord): void {
   ensureRunStorageDir();
   writeFileSync(getRunFilePath(run.runId), JSON.stringify(run, null, 2), "utf-8");
+  enforcePersistedRunRetention();
+}
+
+function enforcePersistedRunRetention(): void {
+  ensureRunStorageDir();
+
+  if (env.MAX_PERSISTED_RUNS <= 0) {
+    return;
+  }
+
+  const persistedFiles = readdirSync(runStorageDir)
+    .filter((fileName) => fileName.endsWith(".json"))
+    .map((fileName) => {
+      const fullPath = join(runStorageDir, fileName);
+      return {
+        fileName,
+        fullPath,
+        mtimeMs: statSync(fullPath).mtimeMs,
+      };
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+
+  const staleFiles = persistedFiles.slice(env.MAX_PERSISTED_RUNS);
+
+  for (const staleFile of staleFiles) {
+    const runId = staleFile.fileName.replace(/\.json$/, "");
+    rmSync(staleFile.fullPath, { force: true });
+    runStore.delete(runId);
+  }
 }
 
 function loadPersistedRuns(): void {
