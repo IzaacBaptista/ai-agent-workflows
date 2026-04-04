@@ -24,6 +24,7 @@ Workflows orchestrate the end-to-end pipeline:
 - persist artifacts after each step
 - replan after important state changes
 - critique the candidate result
+- force `final_analysis` when repeated actions stop making progress
 - return structured output with execution metadata
 
 ### Tools
@@ -31,13 +32,13 @@ Tools execute concrete actions:
 
 - structured logging
 - local code search
-- direct file reads
+- direct file reads with scope restrictions (`src/` and approved extensions only)
 - external API calls
 - tool execution dispatch
 - GitHub comment posting for PR review flows
 
 ### Memory
-Memory stores workflow runs with both in-memory caching and JSON persistence on disk. A run contains plan, replans, critiques, artifacts, and step history.
+Memory stores workflow runs with both in-memory caching and JSON persistence on disk. A run contains plan, replans, critiques, artifacts, and step history. Persisted runs are also subject to retention limits so older runs are pruned.
 
 ### Prompts
 Prompts define reusable instructions for planner, replanner, critic, triage, and final-analysis stages.
@@ -47,7 +48,7 @@ Core contains the shared LLM client, response parsing, schema validation, execut
 
 ## Workflow Shape
 
-Raw input → Planner → Action loop (agents/tools) → Replanner → Final agent → Critic → Optional revision → Validated JSON output
+Raw input → Planner → Action loop (agents/tools) → Replanner → Final agent → Critic → Optional revision → No-progress fallback when needed → Validated JSON output
 
 ## Current Workflows
 
@@ -80,12 +81,44 @@ Each run contains:
 - execution policy
 - full step history
 - artifacts such as plan, replans, critiques, tool results, context, and final result
+- runtime progress state used to detect redundant actions and force `final_analysis`
 
 The API exposes this state through:
 
 - `GET /runs`
 - `GET /runs/:runId`
 - `GET /runs/:runId/artifacts`
+
+Workflow responses also expose execution metadata:
+
+- `runId`
+- `workflowName`
+- `status`
+- `stepCount`
+- `critiqueCount`
+- `replanCount`
+- `githubComment` on PR comment delivery flows
+
+## Execution Policy
+
+The runtime enforces a bounded execution model:
+
+- `maxSteps`
+- `maxRetriesPerStep`
+- `timeoutMs`
+- `maxConsecutiveNoProgress`
+
+This prevents unbounded replanning loops and provides a controlled fallback path to `final_analysis`.
+
+## Testing
+
+The project includes automated coverage for:
+
+- OpenAI response parsing and schema validation
+- runtime retries, timeouts, and metadata generation
+- tool execution and guardrails
+- workflow orchestration success and failure paths
+- HTTP handler behavior via the Express app factory
 
 ## Principles
 
@@ -96,5 +129,6 @@ The API exposes this state through:
 - Explicit tool execution
 - Adaptive replanning
 - Critique before finalization
+- Bounded execution with no-progress detection
 - Persisted and inspectable execution state
 - Fail-fast validation at the workflow boundary

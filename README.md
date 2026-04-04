@@ -51,6 +51,7 @@ MODEL=gpt-4o   # optional, defaults to gpt-5
 LOG_LEVEL=info
 LOG_FULL_PAYLOADS=false
 RUN_STORAGE_DIR=.runs
+MAX_PERSISTED_RUNS=200
 EXTERNAL_API_BASE_URL=
 EXTERNAL_API_TIMEOUT_MS=5000
 ```
@@ -64,12 +65,20 @@ EXTERNAL_API_TIMEOUT_MS=5000
 ### Runtime storage
 
 - `RUN_STORAGE_DIR` defines where workflow runs are persisted as JSON.
+- `MAX_PERSISTED_RUNS` controls retention for persisted runs; older runs are pruned from disk and memory.
 - Run state is loaded back when the process starts.
 
 ### External API tool
 
 - `EXTERNAL_API_BASE_URL` is used by the `call_external_api` workflow tool for relative endpoints.
 - `EXTERNAL_API_TIMEOUT_MS` controls timeout for those external checks.
+- If no external API is configured, the tool returns an explicit `unconfigured` result instead of faking success.
+
+### File reading guardrails
+
+- `read_file` is limited to files inside `src/`.
+- Supported extensions are `.ts`, `.js`, `.json`, and `.md`.
+- This prevents the workflow runtime from reading arbitrary local files.
 
 ## Running workflows
 
@@ -134,13 +143,15 @@ All three workflows follow the same execution pattern:
 1. Planning
    creates an initial action sequence such as `triage -> search_code -> read_file -> final_analysis`.
 2. Execution
-   runs explicit tool and agent steps under an execution policy with retries and timeouts.
+   runs explicit tool and agent steps under an execution policy with retries, timeouts, and step budgets.
 3. Replanning
    revises the remaining steps after important state changes.
 4. Critique
    reviews the candidate result and can request one more focused revision.
 5. Persistence
    stores steps, artifacts, replans, and critiques in persisted run records.
+6. No-progress fallback
+   forces `final_analysis` when repeated tool steps stop adding new information, instead of looping until `maxSteps`.
 
 ## Project structure
 
@@ -374,6 +385,22 @@ Returns the full persisted run record, including steps and status.
 #### GET `/runs/:runId/artifacts`
 
 Returns persisted artifacts such as plan, replans, critiques, context, and result.
+
+## Testing
+
+Run the full suite with:
+
+```bash
+npm run test
+```
+
+The current suite covers:
+
+- resilient parsing of OpenAI Responses output in `BaseAgent`
+- workflow runtime retries, timeouts, and execution metadata
+- tool execution for `search_code`, `read_file`, and `call_external_api`
+- workflow orchestration, critique-driven revision, and failure paths
+- HTTP endpoints and response envelopes through `createApp()`
 
 ### Error responses
 
