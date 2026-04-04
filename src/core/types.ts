@@ -12,6 +12,13 @@ export interface IssueAnalysis {
   assumptions: string[];
 }
 
+export interface IssueTriage {
+  summary: string;
+  investigationAreas: string[];
+  codeSearchTerms: string[];
+  validationChecks: string[];
+}
+
 export interface BugAnalysis {
   summary: string;
   possibleCauses: string[];
