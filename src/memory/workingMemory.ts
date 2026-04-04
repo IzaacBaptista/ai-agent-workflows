@@ -26,6 +26,10 @@ function buildEvidence(run: WorkflowRunRecord): string[] {
     evidence.push("external_api_result");
   }
 
+  if (run.artifacts.commandResults) {
+    evidence.push("command_results");
+  }
+
   if (run.artifacts.reviewerAssessment) {
     evidence.push("reviewer_assessment");
   }

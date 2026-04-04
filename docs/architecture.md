@@ -35,6 +35,7 @@ Tools execute concrete actions:
 - structured logging
 - local code search
 - direct file reads with scope restrictions (`src/` and approved extensions only)
+- allowlisted command execution for local verification (`build` and `test`)
 - external API calls
 - tool execution dispatch
 - GitHub comment posting for PR review flows
@@ -62,21 +63,21 @@ Raw input + relevant memory → Planner → Action loop (analyze/tool_call/deleg
 ### Issue Workflow
 
 - `IssueTriageAgent` identifies investigation areas, code search terms, and validation checks.
-- The runtime may execute `search_code`, `read_file`, and `call_external_api`.
+- The runtime may execute `search_code`, `read_file`, `call_external_api`, and `run_command`.
 - `IssueAgent` produces the structured issue analysis.
 - `CriticAgent` validates the candidate output before completion.
 
 ### Bug Workflow
 
 - `BugTriageAgent` identifies hypotheses, code search terms, and API checks.
-- The runtime may execute `search_code`, `read_file`, and `call_external_api`.
+- The runtime may execute `search_code`, `read_file`, `call_external_api`, and `run_command`.
 - `BugAgent` produces the structured bug diagnosis.
 - `CriticAgent` validates the candidate output before completion.
 
 ### PR Review Workflow
 
 - `PRTriageAgent` identifies review focus areas, code search terms, and regression checks.
-- The runtime may execute `search_code`, `read_file`, and `call_external_api`.
+- The runtime may execute `search_code`, `read_file`, `call_external_api`, and `run_command`.
 - `PRAgent` produces the structured PR review.
 - `CriticAgent` validates the candidate output before completion.
 
@@ -92,6 +93,7 @@ Each run contains:
 - working memory snapshots
 - relevant-memory summaries used during planning, replanning, and critique
 - tool call records with signatures, cache/suppression info, and results
+- command execution results with exit code, timeout status, duration, and truncated stdout/stderr
 - delegation records with target agent, depth, and output
 
 The API exposes this state through:
@@ -137,7 +139,7 @@ The project includes automated coverage for:
 
 - OpenAI response parsing and schema validation
 - runtime retries, timeouts, and metadata generation
-- tool execution and guardrails
+- tool execution and guardrails, including allowlisted command execution
 - workflow orchestration success and failure paths
 - HTTP handler behavior via the Express app factory
 

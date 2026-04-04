@@ -1,6 +1,7 @@
 export type WorkflowRunStatus = "running" | "completed" | "failed";
 export type WorkflowStepStatus = "running" | "completed" | "failed";
-export type WorkflowToolName = "search_code" | "read_file" | "call_external_api";
+export type WorkflowToolName = "search_code" | "read_file" | "call_external_api" | "run_command";
+export type WorkflowCommandName = "build" | "test";
 export type RegisteredAgentName =
   | "PlannerAgent"
   | "ReplannerAgent"
@@ -170,6 +171,16 @@ export interface WorkflowToolResult {
   signature: string;
   cached?: boolean;
   suppressed?: boolean;
+}
+
+export interface CommandExecutionResult {
+  command: WorkflowCommandName;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  durationMs: number;
+  signal?: NodeJS.Signals | null;
 }
 
 export interface WorkflowToolCallRecord {

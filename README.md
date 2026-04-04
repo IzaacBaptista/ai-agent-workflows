@@ -74,6 +74,12 @@ EXTERNAL_API_TIMEOUT_MS=5000
 - `EXTERNAL_API_TIMEOUT_MS` controls timeout for those external checks.
 - If no external API is configured, the tool returns an explicit `unconfigured` result instead of faking success.
 
+### Command execution tool
+
+- `run_command` is an allowlisted workflow tool for local verification steps.
+- Supported commands are currently `build` and `test`.
+- The runtime captures exit code, timeout status, duration, and truncated stdout/stderr, then stores them in run artifacts for replanning and final analysis.
+
 ### File reading guardrails
 
 - `read_file` is limited to files inside `src/`.
@@ -141,7 +147,7 @@ npm run dev -- pr "Refactored auth middleware and updated token validation"
 All three workflows follow the same execution pattern:
 
 1. Planning
-   creates an initial action sequence such as `triage -> search_code -> read_file -> final_analysis`.
+   creates an initial action queue such as `analyze -> tool_call(search_code) -> tool_call(read_file) -> finalize`.
 2. Execution
    runs explicit runtime actions under an execution policy with retries, timeouts, and budgets.
 3. Replanning
@@ -154,6 +160,8 @@ All three workflows follow the same execution pattern:
    forces `final_analysis` when repeated tool steps stop adding new information, instead of looping until `maxSteps`.
 7. Memory-aware planning
    feeds relevant prior runs and working memory back into planner, replanner, and critic.
+8. Controlled command execution
+   allows the model to request `run_command` for `build` or `test` when real project evidence is needed.
 
 ## Project structure
 
@@ -167,7 +175,7 @@ src/
 ├── integrations/
 │   └── github/           # postPRComment (GitHub REST API write operations)
 ├── memory/               # Run store, working memory, and relevant-memory retrieval
-├── tools/                # Structured logging, explicit workflow tools and tool registry/executor
+├── tools/                # Structured logging, explicit workflow tools, allowlisted command execution, and tool registry/executor
 └── workflows/            # Runtime-driven workflow orchestration
 prompts/                  # Prompt templates for planner, replanner, critic, reviewer, triage and final analysis
 ```
@@ -401,7 +409,7 @@ Returns the full persisted run record, including steps and status.
 
 #### GET `/runs/:runId/artifacts`
 
-Returns persisted artifacts such as plan, replans, critiques, context, and result.
+Returns persisted artifacts such as plan, replans, critiques, context, tool calls, command results, and result.
 
 ## Testing
 
@@ -415,7 +423,7 @@ The current suite covers:
 
 - resilient parsing of OpenAI Responses output in `BaseAgent`
 - workflow runtime retries, timeouts, and execution metadata
-- tool execution for `search_code`, `read_file`, and `call_external_api`
+- tool execution for `search_code`, `read_file`, `call_external_api`, and `run_command`
 - workflow orchestration, critique-driven revision, and failure paths
 - HTTP endpoints and response envelopes through `createApp()`
 

@@ -7,6 +7,7 @@ Rules:
 - Keep only the remaining actions needed from this point onward.
 - Use working memory and relevant memory to avoid repeated no-op loops.
 - Do not repeat the same tool call or delegation unless the state clearly changed.
+- Use `run_command` only when build/test evidence is needed and likely to change the conclusion.
 - Prefer replacing the queue with the smallest valid next actions.
 - Always end the queue with `finalize`.
 - Return valid JSON only.

@@ -9,6 +9,7 @@ Rules:
 - Prefer the smallest next actions that gather evidence.
 - Use `analyze` with `stage="triage"` when the workflow first needs structured triage.
 - Use `tool_call` when code or external evidence is needed.
+- Use `tool_call` with `run_command` when build/test evidence is needed before concluding.
 - Use `delegate` only when another agent role would materially improve confidence.
 - Always end the queue with `finalize`.
 - Do not emit `replan` or `critique` unless absolutely necessary.

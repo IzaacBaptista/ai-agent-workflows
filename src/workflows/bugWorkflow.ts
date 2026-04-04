@@ -3,7 +3,7 @@ import { BugTriageAgent } from "../agents/bugTriageAgent";
 import { CriticAgent } from "../agents/criticAgent";
 import { PlannerAgent } from "../agents/plannerAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
-import { BugAnalysis, BugTriage, WorkflowResult } from "../core/types";
+import { BugAnalysis, BugTriage, CommandExecutionResult, WorkflowResult } from "../core/types";
 import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
@@ -19,6 +19,7 @@ function buildBugWorkflowContext(
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
   externalApiResult: unknown,
+  commandResults: CommandExecutionResult[] | undefined,
 ): string {
   return [
     `Bug description: ${bugDescription}`,
@@ -51,6 +52,12 @@ function buildBugWorkflowContext(
     "",
     "External API result:",
     externalApiResult ? JSON.stringify(externalApiResult) : "No external API result",
+    "",
+    "Command results:",
+    ...(commandResults ?? []).map(
+      (result) =>
+        `- ${result.command}: exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${result.stdout.replace(/\n/g, " ").trim()} stderr=${result.stderr.replace(/\n/g, " ").trim()}`,
+    ),
   ].join("\n");
 }
 
@@ -122,7 +129,17 @@ const bugWorkflowDefinition: WorkflowDefinition<BugTriage, BugAnalysis> = {
       | FileReadResult[]
       | undefined;
     const externalApiResult = runtime.getRunRecord().artifacts.externalApiResult;
-    return buildBugWorkflowContext(input, triage, codeSearchResults, fileReadResults, externalApiResult);
+    const commandResults = runtime.getRunRecord().artifacts.commandResults as
+      | CommandExecutionResult[]
+      | undefined;
+    return buildBugWorkflowContext(
+      input,
+      triage,
+      codeSearchResults,
+      fileReadResults,
+      externalApiResult,
+      commandResults,
+    );
   },
   buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
     buildBugCritiqueContext(input, finalContext),

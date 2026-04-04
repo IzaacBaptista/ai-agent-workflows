@@ -11,6 +11,7 @@ import {
   WorkflowExecutionState,
   WorkflowRuntime,
 } from "../core/workflowRuntime";
+import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 
 interface TestTriage {
   summary: string;
@@ -208,6 +209,70 @@ test("WorkflowRuntime safely replans after an invalid tool request", async () =>
     true,
   );
   assert.equal((runtime.getRunRecord().artifacts.validationErrors as unknown[]).length, 1);
+});
+
+test("WorkflowRuntime executes run_command and persists command results for later analysis", async () => {
+  setRunCommandExecutorForTesting(async (command) => ({
+    command,
+    exitCode: 1,
+    stdout: "",
+    stderr: "failing build",
+    timedOut: false,
+    durationMs: 22,
+    signal: null,
+  }));
+
+  try {
+    const runtime = new WorkflowRuntime({
+      workflowName: "RuntimeCommandWorkflow",
+      input: "command execution input",
+      policy: {
+        maxSteps: 8,
+        maxRetriesPerStep: 0,
+        timeoutMs: 1000,
+      },
+    });
+
+    const definition = createDefinition({
+      workflowName: "RuntimeCommandWorkflow",
+      runPlanner: async () => ({
+        summary: "run build before finalizing",
+        actions: [
+          {
+            type: "tool_call",
+            toolName: "run_command",
+            input: { command: "build" },
+            reason: "Need build evidence",
+          },
+          {
+            type: "finalize",
+            task: "finish with build evidence",
+            reason: "build result should influence the answer",
+          },
+        ],
+      }),
+      runReplanner: async () => ({
+        summary: "finalize after command",
+        actions: [
+          {
+            type: "finalize",
+            task: "finish with build evidence",
+            reason: "command result collected",
+          },
+        ],
+      }),
+    });
+
+    const result = await runtime.runActionQueue(definition, "command execution input");
+    const commandResults = runtime.getRunRecord().artifacts.commandResults as Array<{ exitCode: number | null }>;
+
+    assert.equal(result.note, "finish with build evidence:1");
+    assert.equal(runtime.getMeta().toolCallCount, 1);
+    assert.equal(commandResults.length, 1);
+    assert.equal(commandResults[0].exitCode, 1);
+  } finally {
+    setRunCommandExecutorForTesting();
+  }
 });
 
 test("WorkflowRuntime safely replans after an invalid delegation target", async () => {

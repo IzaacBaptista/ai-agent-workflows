@@ -1,8 +1,15 @@
 import { z } from "zod";
-import { WorkflowToolName, WorkflowToolRequest, WorkflowToolResult } from "../core/types";
+import {
+  CommandExecutionResult,
+  WorkflowCommandName,
+  WorkflowToolName,
+  WorkflowToolRequest,
+  WorkflowToolResult,
+} from "../core/types";
 import { ApiResponse, callExternalApi } from "./externalApiTool";
 import { CodeSearchResult, searchCode } from "./codeSearchTool";
 import { FileReadResult, readFiles } from "./readFileTool";
+import { getAllowedCommandNames, isAllowedCommandName, runAllowedCommand } from "./runCommandTool";
 
 const searchCodeInputSchema = z.object({
   terms: z.array(z.string().trim().min(1)).min(1),
@@ -16,16 +23,29 @@ const externalApiInputSchema = z.object({
   endpoint: z.string().trim().min(1),
 });
 
+const runCommandInputSchema = z.object({
+  command: z.string().trim().min(1),
+}).superRefine((value, ctx) => {
+  if (!isAllowedCommandName(value.command)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Unsupported command "${value.command}". Allowed commands: ${getAllowedCommandNames().join(", ")}`,
+    });
+  }
+});
+
 const toolSchemas = {
   search_code: searchCodeInputSchema,
   read_file: readFileInputSchema,
   call_external_api: externalApiInputSchema,
+  run_command: runCommandInputSchema,
 } satisfies Record<WorkflowToolName, z.ZodTypeAny>;
 
 type ValidatedToolInputMap = {
   search_code: z.infer<typeof searchCodeInputSchema>;
   read_file: z.infer<typeof readFileInputSchema>;
   call_external_api: z.infer<typeof externalApiInputSchema>;
+  run_command: z.infer<typeof runCommandInputSchema>;
 };
 
 function buildSearchCodeSummary(results: Record<string, CodeSearchResult[]>): string {
@@ -39,6 +59,10 @@ function buildReadFileSummary(results: FileReadResult[]): string {
 
 function buildExternalApiSummary(result: ApiResponse): string {
   return `status=${result.status}`;
+}
+
+function buildRunCommandSummary(result: CommandExecutionResult): string {
+  return `command=${result.command},exitCode=${result.exitCode ?? "null"},timedOut=${result.timedOut}`;
 }
 
 export function getRegisteredToolNames(): WorkflowToolName[] {
@@ -79,6 +103,11 @@ export function buildWorkflowToolSignature(toolName: WorkflowToolName, input: un
     return `${toolName}:${normalize(parsed.files)}`;
   }
 
+  if (toolName === "run_command") {
+    const parsed = runCommandInputSchema.parse(input);
+    return `${toolName}:${parsed.command.trim().toLowerCase()}`;
+  }
+
   const parsed = externalApiInputSchema.parse(input);
   return `${toolName}:${parsed.endpoint.trim().toLowerCase()}`;
 }
@@ -107,6 +136,18 @@ export async function executeWorkflowTool(request: WorkflowToolRequest): Promise
       summary: buildReadFileSummary(data),
       data,
       signature: buildWorkflowToolSignature("read_file", parsed),
+    };
+  }
+
+  if (request.toolName === "run_command") {
+    const parsed = runCommandInputSchema.parse(request.input);
+    const data = await runAllowedCommand(parsed.command as WorkflowCommandName);
+
+    return {
+      tool: "run_command",
+      summary: buildRunCommandSummary(data),
+      data,
+      signature: buildWorkflowToolSignature("run_command", parsed),
     };
   }
 

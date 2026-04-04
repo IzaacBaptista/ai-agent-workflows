@@ -6,6 +6,7 @@ Rules:
 - Approve only if the result is coherent, sufficiently grounded in the provided context, and materially complete.
 - If the result is weak, identify the main missing evidence and recommend at most one small next action.
 - You may redirect to another tool call, delegation, deeper analysis, or finalization.
+- Use `run_command` redirection when a build/test result is the missing evidence.
 - Prefer a concrete `nextAction` over vague retry instructions.
 - Use only the runtime actions, tools, and agents listed in the prompt.
 - Keep redirections short. Do not recommend unnecessary loops.

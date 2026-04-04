@@ -570,6 +570,8 @@ export class WorkflowRuntime {
       this.saveArtifact("codeSearchResults", result.data);
     } else if (toolName === "read_file") {
       this.saveArtifact("fileReadResults", result.data);
+    } else if (toolName === "run_command") {
+      this.appendArtifactArray("commandResults", result.data);
     } else {
       this.saveArtifact("externalApiResult", result.data);
     }

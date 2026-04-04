@@ -3,7 +3,7 @@ import { IssueAgent } from "../agents/issueAgent";
 import { IssueTriageAgent } from "../agents/issueTriageAgent";
 import { PlannerAgent } from "../agents/plannerAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
-import { IssueAnalysis, IssueTriage, WorkflowResult } from "../core/types";
+import { CommandExecutionResult, IssueAnalysis, IssueTriage, WorkflowResult } from "../core/types";
 import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
@@ -18,6 +18,7 @@ function buildIssueWorkflowContext(
   triage: IssueTriage | undefined,
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
+  commandResults: CommandExecutionResult[] | undefined,
 ): string {
   return [
     "Issue input:",
@@ -48,6 +49,12 @@ function buildIssueWorkflowContext(
     "",
     "Read file results:",
     ...(fileReadResults ?? []).map((file) => `- ${file.file}: ${file.content.replace(/\n/g, " ").trim()}`),
+    "",
+    "Command results:",
+    ...(commandResults ?? []).map(
+      (result) =>
+        `- ${result.command}: exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${result.stdout.replace(/\n/g, " ").trim()} stderr=${result.stderr.replace(/\n/g, " ").trim()}`,
+    ),
   ].join("\n");
 }
 
@@ -118,7 +125,10 @@ const issueWorkflowDefinition: WorkflowDefinition<IssueTriage, IssueAnalysis> = 
     const fileReadResults = runtime.getRunRecord().artifacts.fileReadResults as
       | FileReadResult[]
       | undefined;
-    return buildIssueWorkflowContext(input, triage, codeSearchResults, fileReadResults);
+    const commandResults = runtime.getRunRecord().artifacts.commandResults as
+      | CommandExecutionResult[]
+      | undefined;
+    return buildIssueWorkflowContext(input, triage, codeSearchResults, fileReadResults, commandResults);
   },
   buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
     buildIssueCritiqueContext(input, finalContext),
