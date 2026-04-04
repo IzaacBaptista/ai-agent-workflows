@@ -1,17 +1,10 @@
-import { z } from "zod";
 import { BaseAgent } from "../core/baseAgent";
+import { workflowCritiqueSchema } from "../core/actionSchemas";
 import { callLLM } from "../core/llmClient";
-import { WorkflowCritique } from "../core/types";
+import { RelevantMemoryContext, WorkflowCritique, WorkingMemorySnapshot } from "../core/types";
+import { buildPlannerContextFromMemory } from "../helpers/buildPlannerContextFromMemory";
+import { summarizeWorkingMemory } from "../memory/workingMemory";
 import { loadPrompt } from "../helpers/loadPrompt";
-
-const workflowCritiqueSchema = z.object({
-  approved: z.boolean(),
-  summary: z.string(),
-  gaps: z.array(z.string()),
-  recommendedActions: z.array(
-    z.enum(["triage", "search_code", "read_file", "call_external_api", "final_analysis"]),
-  ),
-});
 
 export class CriticAgent extends BaseAgent<WorkflowCritique> {
   async run(input: string): Promise<WorkflowCritique> {
@@ -21,9 +14,20 @@ export class CriticAgent extends BaseAgent<WorkflowCritique> {
     return this.parseResponse(response, workflowCritiqueSchema);
   }
 
-  async review(workflowName: string, context: string, candidateResult: unknown): Promise<WorkflowCritique> {
+  async review(
+    workflowName: string,
+    context: string,
+    candidateResult: unknown,
+    workingMemory: WorkingMemorySnapshot,
+    memoryContext: RelevantMemoryContext,
+  ): Promise<WorkflowCritique> {
     return this.run([
       `Workflow: ${workflowName}`,
+      "",
+      buildPlannerContextFromMemory(memoryContext),
+      "",
+      "Working memory:",
+      summarizeWorkingMemory(workingMemory),
       "",
       "Review context:",
       context,

@@ -2,25 +2,27 @@
 
 ## Overview
 
-This project is structured as a lightweight multi-agent execution runtime for engineering tasks. Each workflow combines planning, explicit tool usage, adaptive replanning, candidate generation, critique, and persisted execution state.
+This project is structured as a lightweight multi-agent execution runtime for engineering tasks. Each workflow combines memory-aware planning, explicit runtime actions, model-driven tool usage, adaptive replanning, dynamic delegation, candidate generation, critique, and persisted execution state.
 
 ## Layers
 
 ### Agents
 Agents are split into distinct responsibilities:
 
-- `PlannerAgent` proposes the initial action sequence.
-- `ReplannerAgent` revises the remaining actions based on current run state.
+- `PlannerAgent` proposes the initial action queue using relevant memory.
+- `ReplannerAgent` revises the remaining actions based on current run state and memory.
 - Triage agents create investigation briefs from raw input.
 - Final analysis agents produce candidate structured responses.
-- `CriticAgent` reviews the candidate result and can request a focused revision.
+- `CriticAgent` reviews the candidate result and can redirect execution to a specific next action.
+- `ReviewerAgent` is an optional delegatable verifier that checks whether conclusions are actually supported by evidence.
 
 ### Workflows
 Workflows orchestrate the end-to-end pipeline:
 
 - create a persisted run
-- execute planned steps under policy constraints
+- execute a queue of structured runtime actions under policy constraints
 - invoke explicit tools
+- invoke delegated agents dynamically
 - persist artifacts after each step
 - replan after important state changes
 - critique the candidate result
@@ -38,7 +40,12 @@ Tools execute concrete actions:
 - GitHub comment posting for PR review flows
 
 ### Memory
-Memory stores workflow runs with both in-memory caching and JSON persistence on disk. A run contains plan, replans, critiques, artifacts, and step history. Persisted runs are also subject to retention limits so older runs are pruned.
+Memory has two layers:
+
+- working memory derived from the current run state and artifacts
+- persisted run memory loaded from disk and queried for relevant prior runs
+
+Each run still contains plan, replans, critiques, artifacts, and step history. Persisted runs are subject to retention limits so older runs are pruned.
 
 ### Prompts
 Prompts define reusable instructions for planner, replanner, critic, triage, and final-analysis stages.
@@ -48,7 +55,7 @@ Core contains the shared LLM client, response parsing, schema validation, execut
 
 ## Workflow Shape
 
-Raw input → Planner → Action loop (agents/tools) → Replanner → Final agent → Critic → Optional revision → No-progress fallback when needed → Validated JSON output
+Raw input + relevant memory → Planner → Action loop (analyze/tool_call/delegate) → Replanner → Final agent → Critic → Optional redirect/delegation → No-progress fallback when needed → Validated JSON output
 
 ## Current Workflows
 
@@ -82,6 +89,10 @@ Each run contains:
 - full step history
 - artifacts such as plan, replans, critiques, tool results, context, and final result
 - runtime progress state used to detect redundant actions and force `final_analysis`
+- working memory snapshots
+- relevant-memory summaries used during planning, replanning, and critique
+- tool call records with signatures, cache/suppression info, and results
+- delegation records with target agent, depth, and output
 
 The API exposes this state through:
 
@@ -97,6 +108,11 @@ Workflow responses also expose execution metadata:
 - `stepCount`
 - `critiqueCount`
 - `replanCount`
+- `toolCallCount`
+- `delegationCount`
+- `maxDelegationDepthReached`
+- `memoryHits`
+- `criticRedirectCount`
 - `githubComment` on PR comment delivery flows
 
 ## Execution Policy
@@ -107,6 +123,11 @@ The runtime enforces a bounded execution model:
 - `maxRetriesPerStep`
 - `timeoutMs`
 - `maxConsecutiveNoProgress`
+- `maxToolCalls`
+- `maxRepeatedIdenticalToolCalls`
+- `maxDelegationsPerRun`
+- `maxDelegationDepth`
+- `maxCriticRedirects`
 
 This prevents unbounded replanning loops and provides a controlled fallback path to `final_analysis`.
 
@@ -127,6 +148,9 @@ The project includes automated coverage for:
 - Reusable prompts
 - Controlled multi-agent orchestration
 - Explicit tool execution
+- Explicit runtime actions
+- Dynamic delegation
+- Memory-informed decisions
 - Adaptive replanning
 - Critique before finalization
 - Bounded execution with no-progress detection

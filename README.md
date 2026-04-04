@@ -15,10 +15,10 @@ This project exposes three structured AI workflows:
 Each workflow now runs as a multi-agent execution loop:
 
 1. A planner proposes the next actions.
-2. A specialist or tool step executes.
-3. A replanner can adjust the remaining actions based on run state.
+2. A specialist, tool call, or delegated agent executes.
+3. A replanner can replace the remaining action queue based on run state and memory.
 4. A final analysis agent produces a candidate result.
-5. A critic agent can approve the result or force one more revision cycle.
+5. A critic agent can approve the result or redirect the workflow to a specific next action.
 
 Responses are generated through the OpenAI Responses API and validated with [Zod](https://zod.dev/) before being returned.
 
@@ -143,15 +143,17 @@ All three workflows follow the same execution pattern:
 1. Planning
    creates an initial action sequence such as `triage -> search_code -> read_file -> final_analysis`.
 2. Execution
-   runs explicit tool and agent steps under an execution policy with retries, timeouts, and step budgets.
+   runs explicit runtime actions under an execution policy with retries, timeouts, and budgets.
 3. Replanning
-   revises the remaining steps after important state changes.
+   revises the remaining action queue after important state changes.
 4. Critique
-   reviews the candidate result and can request one more focused revision.
+   reviews the candidate result and can redirect into a tool call, delegation, or another focused finalization pass.
 5. Persistence
    stores steps, artifacts, replans, and critiques in persisted run records.
 6. No-progress fallback
    forces `final_analysis` when repeated tool steps stop adding new information, instead of looping until `maxSteps`.
+7. Memory-aware planning
+   feeds relevant prior runs and working memory back into planner, replanner, and critic.
 
 ## Project structure
 
@@ -159,15 +161,15 @@ All three workflows follow the same execution pattern:
 src/
 ├── index.ts              # CLI entrypoint
 ├── agents/               # Planner, replanner, critic, triage and final analysis agents
-├── core/                 # BaseAgent, LLM client, workflow runtime, shared types
+├── core/                 # BaseAgent, action schemas, LLM client, workflow runtime, shared types
 ├── config/               # Environment variable loading
-├── helpers/              # loadPrompt, buildGitHubPRReviewInput, fetchGitHubPR, formatPRReviewComment
+├── helpers/              # loadPrompt, memory context builders, GitHub helpers
 ├── integrations/
 │   └── github/           # postPRComment (GitHub REST API write operations)
-├── memory/               # Run store with in-memory cache and JSON persistence
-├── tools/                # Structured logging, explicit workflow tools and executors
+├── memory/               # Run store, working memory, and relevant-memory retrieval
+├── tools/                # Structured logging, explicit workflow tools and tool registry/executor
 └── workflows/            # Runtime-driven workflow orchestration
-prompts/                  # Prompt templates for planner, replanner, critic, triage and final analysis
+prompts/                  # Prompt templates for planner, replanner, critic, reviewer, triage and final analysis
 ```
 
 ## HTTP API
@@ -212,7 +214,12 @@ curl -X POST http://localhost:3000/issue/analyze \
     "status": "completed",
     "stepCount": 8,
     "critiqueCount": 1,
-    "replanCount": 2
+    "replanCount": 2,
+    "toolCallCount": 1,
+    "delegationCount": 0,
+    "maxDelegationDepthReached": 0,
+    "memoryHits": 3,
+    "criticRedirectCount": 0
   }
 }
 ```
@@ -235,7 +242,12 @@ curl -X POST http://localhost:3000/bug/analyze \
     "status": "completed",
     "stepCount": 9,
     "critiqueCount": 1,
-    "replanCount": 2
+    "replanCount": 2,
+    "toolCallCount": 1,
+    "delegationCount": 0,
+    "maxDelegationDepthReached": 0,
+    "memoryHits": 3,
+    "criticRedirectCount": 0
   }
 }
 ```
@@ -258,7 +270,12 @@ curl -X POST http://localhost:3000/pr/review \
     "status": "completed",
     "stepCount": 9,
     "critiqueCount": 1,
-    "replanCount": 2
+    "replanCount": 2,
+    "toolCallCount": 1,
+    "delegationCount": 1,
+    "maxDelegationDepthReached": 1,
+    "memoryHits": 3,
+    "criticRedirectCount": 1
   }
 }
 ```

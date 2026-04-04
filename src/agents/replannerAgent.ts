@@ -1,18 +1,9 @@
-import { z } from "zod";
 import { BaseAgent } from "../core/baseAgent";
+import { workflowReplanSchema } from "../core/actionSchemas";
 import { callLLM } from "../core/llmClient";
-import { WorkflowReplan } from "../core/types";
+import { RelevantMemoryContext, RegisteredAgentName, WorkflowReplan, WorkflowToolName } from "../core/types";
+import { buildPlannerContextFromMemory } from "../helpers/buildPlannerContextFromMemory";
 import { loadPrompt } from "../helpers/loadPrompt";
-
-const workflowReplanSchema = z.object({
-  summary: z.string(),
-  steps: z.array(
-    z.object({
-      action: z.enum(["triage", "search_code", "read_file", "call_external_api", "final_analysis"]),
-      purpose: z.string(),
-    }),
-  ).min(1),
-});
 
 export class ReplannerAgent extends BaseAgent<WorkflowReplan> {
   async run(input: string): Promise<WorkflowReplan> {
@@ -23,10 +14,20 @@ export class ReplannerAgent extends BaseAgent<WorkflowReplan> {
     return this.parseResponse(response, workflowReplanSchema);
   }
 
-  async runForWorkflow(workflowName: string, context: string): Promise<WorkflowReplan> {
+  async runForWorkflow(
+    workflowName: string,
+    context: string,
+    memoryContext: RelevantMemoryContext,
+    availableTools: WorkflowToolName[],
+    delegatableAgents: RegisteredAgentName[],
+  ): Promise<WorkflowReplan> {
     return this.run([
       `Workflow: ${workflowName}`,
-      "Available actions: triage, search_code, read_file, call_external_api, final_analysis",
+      "Available runtime actions: analyze, tool_call, delegate, finalize",
+      `Available tools: ${availableTools.join(", ")}`,
+      `Delegatable agents: ${delegatableAgents.join(", ")}`,
+      "",
+      buildPlannerContextFromMemory(memoryContext),
       "",
       context,
     ].join("\n"));

@@ -5,8 +5,8 @@ import { readFiles } from "../tools/readFileTool";
 
 test("toolExecutor executes search_code", async () => {
   const result = await executeWorkflowTool({
-    tool: "search_code",
-    terms: ["WorkflowRuntime"],
+    toolName: "search_code",
+    input: { terms: ["WorkflowRuntime"] },
   });
 
   assert.equal(result.tool, "search_code");
@@ -16,8 +16,8 @@ test("toolExecutor executes search_code", async () => {
 
 test("toolExecutor executes read_file", async () => {
   const result = await executeWorkflowTool({
-    tool: "read_file",
-    files: ["src/core/types.ts"],
+    toolName: "read_file",
+    input: { files: ["src/core/types.ts"] },
   });
 
   assert.equal(result.tool, "read_file");
@@ -28,8 +28,8 @@ test("toolExecutor executes read_file", async () => {
 
 test("toolExecutor returns unconfigured external API response when base URL is absent", async () => {
   const result = await executeWorkflowTool({
-    tool: "call_external_api",
-    endpoint: "health",
+    toolName: "call_external_api",
+    input: { endpoint: "health" },
   });
 
   assert.equal(result.tool, "call_external_api");

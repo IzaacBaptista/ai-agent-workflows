@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runIssueWorkflow } from "../workflows/issueWorkflow";
-import { runBugWorkflow } from "../workflows/bugWorkflow";
-import { runPRReviewWorkflow } from "../workflows/prReviewWorkflow";
 import * as llmClient from "../core/llmClient";
+import { WorkflowRuntime } from "../core/workflowRuntime";
+import { runBugWorkflow } from "../workflows/bugWorkflow";
+import { runIssueWorkflow } from "../workflows/issueWorkflow";
+import { runPRReviewWorkflow } from "../workflows/prReviewWorkflow";
 
 type MockResponsePayload = Record<string, unknown>;
 
@@ -13,15 +14,23 @@ function buildLlmResponse(payload: MockResponsePayload): { output_text: string }
   };
 }
 
-test("runIssueWorkflow executes planner, replanner, final analysis and critic", async () => {
+test("runIssueWorkflow executes model-driven tool call and finalize", async () => {
   const originalCallLlm = llmClient.callLLM;
   const responses = [
     buildLlmResponse({
       summary: "Issue workflow plan",
-      steps: [
-        { action: "triage", purpose: "triage first" },
-        { action: "search_code", purpose: "inspect code" },
-        { action: "final_analysis", purpose: "produce result" },
+      actions: [
+        {
+          type: "analyze",
+          stage: "triage",
+          task: "Collect initial issue investigation direction",
+          reason: "Need triage first",
+        },
+        {
+          type: "finalize",
+          task: "Produce the issue analysis",
+          reason: "Finalize after evidence gathering",
+        },
       ],
     }),
     buildLlmResponse({
@@ -31,15 +40,30 @@ test("runIssueWorkflow executes planner, replanner, final analysis and critic", 
       validationChecks: ["confirm reproduction"],
     }),
     buildLlmResponse({
-      summary: "Continue with code search then finish",
-      steps: [
-        { action: "search_code", purpose: "collect evidence" },
-        { action: "final_analysis", purpose: "finish analysis" },
+      summary: "Search code before finalizing",
+      actions: [
+        {
+          type: "tool_call",
+          toolName: "search_code",
+          input: { terms: ["IssueWorkflow"] },
+          reason: "Need repository evidence",
+        },
+        {
+          type: "finalize",
+          task: "Produce the issue analysis",
+          reason: "Enough evidence after code search",
+        },
       ],
     }),
     buildLlmResponse({
-      summary: "Finish now",
-      steps: [{ action: "final_analysis", purpose: "enough context gathered" }],
+      summary: "Finalize now",
+      actions: [
+        {
+          type: "finalize",
+          task: "Produce the issue analysis",
+          reason: "Enough evidence gathered",
+        },
+      ],
     }),
     buildLlmResponse({
       summary: "Issue analysis summary",
@@ -53,8 +77,8 @@ test("runIssueWorkflow executes planner, replanner, final analysis and critic", 
     buildLlmResponse({
       approved: true,
       summary: "Looks good",
-      gaps: [],
-      recommendedActions: [],
+      missingEvidence: [],
+      confidence: "high",
     }),
   ];
 
@@ -79,61 +103,54 @@ test("runIssueWorkflow executes planner, replanner, final analysis and critic", 
     assert.equal(result.meta.workflowName, "IssueWorkflow");
     assert.equal(result.meta.critiqueCount, 1);
     assert.equal(result.meta.replanCount, 2);
-    assert.ok(result.meta.stepCount >= 7);
+    assert.equal(result.meta.toolCallCount, 1);
+    assert.ok(result.meta.stepCount >= 6);
   } finally {
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
   }
 });
 
-test("runBugWorkflow retries final analysis once when critic rejects first result", async () => {
+test("runBugWorkflow uses relevant memory in planner input to avoid a repeated tool loop", async () => {
+  const priorRuntime = new WorkflowRuntime({
+    workflowName: "BugWorkflow",
+    input: "500 error when creating order with coupon",
+  });
+  priorRuntime.forceFinalAnalysis("Repeated search_code steps produced no new matches");
+  priorRuntime.complete();
+
   const originalCallLlm = llmClient.callLLM;
+  let plannerPromptIncludedMemory = false;
   const responses = [
     buildLlmResponse({
-      summary: "Bug workflow plan",
-      steps: [
-        { action: "triage", purpose: "triage first" },
-        { action: "final_analysis", purpose: "draft result" },
+      summary: "Memory-aware bug workflow plan",
+      actions: [
+        {
+          type: "finalize",
+          task: "Produce a bug diagnosis without repeating the same empty search loop",
+          reason: "Relevant memory shows a prior no-op search loop",
+        },
       ],
     }),
     buildLlmResponse({
-      summary: "Bug triage summary",
-      hypotheses: ["validation failure"],
-      codeSearchTerms: ["BugWorkflow"],
-      apiChecks: ["bug-investigation"],
-    }),
-    buildLlmResponse({
-      summary: "Go to final analysis",
-      steps: [{ action: "final_analysis", purpose: "enough to produce a first answer" }],
-    }),
-    buildLlmResponse({
-      summary: "First candidate summary",
+      summary: "Bug result",
       possibleCauses: ["validation failure"],
-      investigationSteps: ["inspect validators"],
-      fixSuggestions: ["tighten validation"],
-      risks: ["regression in order flow"],
-    }),
-    buildLlmResponse({
-      approved: false,
-      summary: "Need one tighter pass",
-      gaps: ["Need sharper fix guidance"],
-      recommendedActions: ["final_analysis"],
-    }),
-    buildLlmResponse({
-      summary: "Second candidate summary",
-      possibleCauses: ["validation failure"],
-      investigationSteps: ["inspect validators", "review order payload handling"],
-      fixSuggestions: ["tighten validation", "add defensive checks"],
+      investigationSteps: ["review recent auth changes"],
+      fixSuggestions: ["avoid redundant searches when memory already indicates a loop"],
       risks: ["regression in order flow"],
     }),
     buildLlmResponse({
       approved: true,
-      summary: "Approved after revision",
-      gaps: [],
-      recommendedActions: [],
+      summary: "Approved",
+      missingEvidence: [],
+      confidence: "high",
     }),
   ];
 
-  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async (prompt: string) => {
+    if (prompt.includes("Relevant memory")) {
+      plannerPromptIncludedMemory = prompt.includes("Repeated search_code steps produced no new matches");
+    }
+
     const next = responses.shift();
     if (!next) {
       throw new Error("No more mocked LLM responses");
@@ -150,22 +167,28 @@ test("runBugWorkflow retries final analysis once when critic rejects first resul
       return;
     }
 
-    assert.equal(result.data.summary, "Second candidate summary");
+    assert.equal(result.data.summary, "Bug result");
     assert.equal(result.meta.workflowName, "BugWorkflow");
-    assert.equal(result.meta.critiqueCount, 2);
-    assert.equal(result.meta.replanCount, 1);
-    assert.ok(result.meta.stepCount >= 6);
+    assert.equal(result.meta.toolCallCount, 0);
+    assert.ok(plannerPromptIncludedMemory);
   } finally {
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
   }
 });
 
-test("runPRReviewWorkflow fails when planner returns invalid plan", async () => {
+test("runPRReviewWorkflow fails when planner returns invalid action queue", async () => {
   const originalCallLlm = llmClient.callLLM;
   const responses = [
     buildLlmResponse({
       summary: "Invalid plan",
-      steps: [{ action: "triage", purpose: "missing final analysis" }],
+      actions: [
+        {
+          type: "analyze",
+          stage: "triage",
+          task: "Missing finalize action",
+          reason: "invalid test fixture",
+        },
+      ],
     }),
   ];
 
@@ -182,7 +205,7 @@ test("runPRReviewWorkflow fails when planner returns invalid plan", async () => 
     const result = await runPRReviewWorkflow("Refactored auth middleware");
 
     assert.equal(result.success, false);
-    assert.match(result.error, /must end with "final_analysis"/);
+    assert.match(result.error, /must end with "finalize"/);
     assert.equal(result.meta.workflowName, "PRReviewWorkflow");
     assert.equal(result.meta.status, "failed");
   } finally {
@@ -190,12 +213,18 @@ test("runPRReviewWorkflow fails when planner returns invalid plan", async () => 
   }
 });
 
-test("runPRReviewWorkflow fails after critic rejects both attempts", async () => {
+test("runPRReviewWorkflow lets the critic redirect into ReviewerAgent delegation", async () => {
   const originalCallLlm = llmClient.callLLM;
   const responses = [
     buildLlmResponse({
       summary: "PR workflow plan",
-      steps: [{ action: "final_analysis", purpose: "go straight to analysis" }],
+      actions: [
+        {
+          type: "finalize",
+          task: "Produce the initial PR review",
+          reason: "Enough context to draft a first pass",
+        },
+      ],
     }),
     buildLlmResponse({
       summary: "First PR candidate",
@@ -206,9 +235,35 @@ test("runPRReviewWorkflow fails after critic rejects both attempts", async () =>
     }),
     buildLlmResponse({
       approved: false,
-      summary: "Not enough depth",
-      gaps: ["needs sharper risk analysis"],
-      recommendedActions: ["final_analysis"],
+      summary: "Need independent verification",
+      missingEvidence: ["independent evidence review"],
+      confidence: "medium",
+      nextAction: {
+        type: "delegate",
+        targetAgent: "ReviewerAgent",
+        task: "Verify whether the PR conclusion is sufficiently supported by evidence",
+        reason: "Need independent verification before finalizing",
+      },
+    }),
+    buildLlmResponse({
+      supported: false,
+      summary: "One tighter pass is needed",
+      missingEvidence: ["need sharper regression framing"],
+      recommendedAction: {
+        type: "finalize",
+        task: "Revise the PR review using reviewer feedback",
+        reason: "Need one tighter pass",
+      },
+    }),
+    buildLlmResponse({
+      summary: "Replan after reviewer",
+      actions: [
+        {
+          type: "finalize",
+          task: "Revise the PR review using reviewer feedback",
+          reason: "Reviewer requested a tighter final pass",
+        },
+      ],
     }),
     buildLlmResponse({
       summary: "Second PR candidate",
@@ -218,10 +273,10 @@ test("runPRReviewWorkflow fails after critic rejects both attempts", async () =>
       testRecommendations: ["add middleware coverage", "add auth integration test"],
     }),
     buildLlmResponse({
-      approved: false,
-      summary: "Still not sufficient",
-      gaps: ["insufficient confidence"],
-      recommendedActions: ["final_analysis"],
+      approved: true,
+      summary: "Approved after reviewer verification",
+      missingEvidence: [],
+      confidence: "high",
     }),
   ];
 
@@ -245,88 +300,9 @@ test("runPRReviewWorkflow fails after critic rejects both attempts", async () =>
     assert.equal(result.data.summary, "Second PR candidate");
     assert.equal(result.meta.workflowName, "PRReviewWorkflow");
     assert.equal(result.meta.critiqueCount, 2);
+    assert.equal(result.meta.delegationCount, 1);
+    assert.equal(result.meta.criticRedirectCount, 1);
     assert.equal(result.meta.status, "completed");
-  } finally {
-    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
-  }
-});
-
-test("runPRReviewWorkflow falls back to final_analysis when read_file repeats without progress", async () => {
-  const originalCallLlm = llmClient.callLLM;
-  const responses = [
-    buildLlmResponse({
-      summary: "PR workflow plan",
-      steps: [
-        { action: "triage", purpose: "triage first" },
-        { action: "search_code", purpose: "find files" },
-        { action: "read_file", purpose: "inspect files" },
-        { action: "final_analysis", purpose: "finish" },
-      ],
-    }),
-    buildLlmResponse({
-      summary: "PR triage summary",
-      reviewFocus: ["runtime"],
-      codeSearchTerms: ["WorkflowRuntime"],
-      regressionChecks: ["runtime tests"],
-    }),
-    buildLlmResponse({
-      summary: "Continue with search then read",
-      steps: [
-        { action: "search_code", purpose: "find files" },
-        { action: "read_file", purpose: "inspect files" },
-        { action: "final_analysis", purpose: "finish" },
-      ],
-    }),
-    buildLlmResponse({
-      summary: "Continue with read then finish",
-      steps: [
-        { action: "read_file", purpose: "inspect files" },
-        { action: "final_analysis", purpose: "finish" },
-      ],
-    }),
-    buildLlmResponse({
-      summary: "Repeat read",
-      steps: [
-        { action: "read_file", purpose: "inspect the same files again" },
-        { action: "final_analysis", purpose: "finish" },
-      ],
-    }),
-    buildLlmResponse({
-      summary: "Final PR result after fallback",
-      impacts: ["runtime behavior stabilized"],
-      risks: ["replanner may still over-read"],
-      suggestions: ["add dedupe tests"],
-      testRecommendations: ["cover repeated read_file fallback"],
-    }),
-    buildLlmResponse({
-      approved: true,
-      summary: "approved",
-      gaps: [],
-      recommendedActions: [],
-    }),
-  ];
-
-  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
-    const next = responses.shift();
-    if (!next) {
-      throw new Error("No more mocked LLM responses");
-    }
-
-    return next;
-  };
-
-  try {
-    const result = await runPRReviewWorkflow("Review repeated read_file behavior");
-
-    assert.equal(result.success, true);
-    if (!result.success) {
-      return;
-    }
-
-    assert.equal(result.data.summary, "Final PR result after fallback");
-    assert.equal(result.meta.workflowName, "PRReviewWorkflow");
-    assert.equal(result.meta.status, "completed");
-    assert.ok(result.meta.stepCount <= 10);
   } finally {
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
   }
