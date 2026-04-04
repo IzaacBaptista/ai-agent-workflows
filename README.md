@@ -440,11 +440,18 @@ Run the higher-level runtime eval harness with:
 npm run evals
 ```
 
+Write a structured JSON report for CI or regression tracking with:
+
+```bash
+npm run evals:report
+```
+
 List available scenarios or run one scenario only:
 
 ```bash
 npm run evals -- --list
 npm run evals -- --scenario pr-uses-git-context-tools
+npm run evals -- --output .eval-reports/custom.json
 ```
 
 The eval harness uses isolated `.eval-runs` storage and checks scenario-level behavior such as:

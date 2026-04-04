@@ -4,3 +4,4 @@ dist/
 .codex
 .runs/
 .eval-runs/
+.eval-reports/

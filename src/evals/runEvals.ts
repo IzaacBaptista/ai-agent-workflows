@@ -1,4 +1,6 @@
 import { env } from "../config/env";
+import { mkdirSync, writeFileSync } from "fs";
+import { dirname, resolve } from "path";
 import * as llmClient from "../core/llmClient";
 import { WorkflowRunRecord, WorkflowResult } from "../core/types";
 import { getRunMemory, resetRunMemories } from "../memory/simpleMemory";
@@ -18,17 +20,47 @@ interface ScenarioExecutionResult {
   error?: string;
 }
 
+interface EvalReportCheck {
+  label: string;
+  passed: boolean;
+  details?: string;
+}
+
+interface EvalReportScenario {
+  id: string;
+  workflow: EvalScenario["workflow"];
+  description: string;
+  passed: boolean;
+  runId?: string;
+  error?: string;
+  notes: string[];
+  checks: EvalReportCheck[];
+}
+
+interface EvalReport {
+  generatedAt: string;
+  runStorageDir: string;
+  scenarioCount: number;
+  passedScenarioCount: number;
+  totalChecks: number;
+  passedChecks: number;
+  failedScenarioIds: string[];
+  scenarios: EvalReportScenario[];
+}
+
 function isIsolatedEvalStorage(): boolean {
   return env.RUN_STORAGE_DIR.includes(".eval-runs");
 }
 
-function parseArgs(): { scenarioId?: string; listOnly: boolean } {
+function parseArgs(): { scenarioId?: string; listOnly: boolean; outputPath?: string } {
   const args = process.argv.slice(2);
   const scenarioFlagIndex = args.findIndex((value) => value === "--scenario");
+  const outputFlagIndex = args.findIndex((value) => value === "--output");
 
   return {
     scenarioId: scenarioFlagIndex >= 0 ? args[scenarioFlagIndex + 1] : undefined,
     listOnly: args.includes("--list"),
+    outputPath: outputFlagIndex >= 0 ? args[outputFlagIndex + 1] : undefined,
   };
 }
 
@@ -70,6 +102,47 @@ function printScenarioResult(result: ScenarioExecutionResult): void {
   }
 
   console.log("");
+}
+
+function buildEvalReport(results: ScenarioExecutionResult[]): EvalReport {
+  const scenarioCount = results.length;
+  const passedScenarioCount = results.filter((result) => result.passed).length;
+  const totalChecks = results.reduce((count, result) => count + result.checks.length, 0);
+  const passedChecks = results.reduce(
+    (count, result) => count + result.checks.filter((check) => check.passed).length,
+    0,
+  );
+
+  return {
+    generatedAt: new Date().toISOString(),
+    runStorageDir: env.RUN_STORAGE_DIR,
+    scenarioCount,
+    passedScenarioCount,
+    totalChecks,
+    passedChecks,
+    failedScenarioIds: results.filter((result) => !result.passed).map((result) => result.scenario.id),
+    scenarios: results.map((result) => ({
+      id: result.scenario.id,
+      workflow: result.scenario.workflow,
+      description: result.scenario.description,
+      passed: result.passed,
+      runId: result.runId,
+      error: result.error,
+      notes: result.notes,
+      checks: result.checks.map((check) => ({
+        label: check.label,
+        passed: check.passed,
+        details: check.details,
+      })),
+    })),
+  };
+}
+
+function writeEvalReport(outputPath: string, report: EvalReport): string {
+  const resolvedPath = resolve(process.cwd(), outputPath);
+  mkdirSync(dirname(resolvedPath), { recursive: true });
+  writeFileSync(resolvedPath, JSON.stringify(report, null, 2), "utf-8");
+  return resolvedPath;
 }
 
 async function executeScenario(scenario: EvalScenario): Promise<ScenarioExecutionResult> {
@@ -141,7 +214,7 @@ async function executeScenario(scenario: EvalScenario): Promise<ScenarioExecutio
 }
 
 async function main(): Promise<void> {
-  const { scenarioId, listOnly } = parseArgs();
+  const { scenarioId, listOnly, outputPath } = parseArgs();
   const scenarios = getEvalScenarios();
 
   if (listOnly) {
@@ -176,18 +249,18 @@ async function main(): Promise<void> {
     printScenarioResult(result);
   }
 
-  const passedScenarios = results.filter((result) => result.passed).length;
-  const totalChecks = results.reduce((count, result) => count + result.checks.length, 0);
-  const passedChecks = results.reduce(
-    (count, result) => count + result.checks.filter((check) => check.passed).length,
-    0,
-  );
+  const report = buildEvalReport(results);
 
   console.log(
-    `Summary: ${passedScenarios}/${results.length} scenarios passed, ${passedChecks}/${totalChecks} checks passed.`,
+    `Summary: ${report.passedScenarioCount}/${report.scenarioCount} scenarios passed, ${report.passedChecks}/${report.totalChecks} checks passed.`,
   );
 
-  if (passedScenarios !== results.length) {
+  if (outputPath) {
+    const resolvedPath = writeEvalReport(outputPath, report);
+    console.log(`Report written to ${resolvedPath}`);
+  }
+
+  if (report.passedScenarioCount !== results.length) {
     process.exitCode = 1;
   }
 }
