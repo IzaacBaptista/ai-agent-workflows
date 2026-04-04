@@ -104,6 +104,34 @@ test("WorkflowRuntime records completed steps and metadata", async () => {
   assert.equal(meta.stepCount, 1);
 });
 
+test("WorkflowRuntime allows critique immediately after finalize at the maxSteps boundary", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "ReservedCritiqueWorkflow",
+    input: "reserved critique input",
+    policy: {
+      maxSteps: 2,
+      maxRetriesPerStep: 0,
+      timeoutMs: 1000,
+    },
+  });
+
+  const definition = createDefinition({
+    workflowName: "ReservedCritiqueWorkflow",
+    runPlanner: async () => ({
+      summary: "finalize directly",
+      actions: [{ type: "finalize", task: "finish", reason: "finish at limit" }],
+    }),
+  });
+
+  const result = await runtime.runActionQueue(definition, "reserved critique input");
+
+  assert.equal(result.note, "finish:1");
+  assert.equal(runtime.getMeta().critiqueCount, 1);
+  assert.equal(runtime.getMeta().stepCount, 3);
+  const steps = runtime.getRunRecord().steps;
+  assert.equal(steps[steps.length - 1]?.name, "critique");
+});
+
 test("WorkflowRuntime retries failed step once when configured", async () => {
   const runtime = new WorkflowRuntime({
     workflowName: "RetryWorkflow",

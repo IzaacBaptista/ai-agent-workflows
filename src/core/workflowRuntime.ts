@@ -359,7 +359,13 @@ export class WorkflowRuntime {
     options: ExecuteStepOptions = {},
   ): Promise<T> {
     this.stepCount += 1;
-    if (this.stepCount > this.policy.maxSteps) {
+    const previousStep = this.getRunRecord().steps[this.getRunRecord().steps.length - 1];
+    const isReservedCritiqueStep =
+      name === "critique" &&
+      previousStep?.name === "finalize" &&
+      previousStep.status === "completed";
+
+    if (this.stepCount > this.policy.maxSteps && !isReservedCritiqueStep) {
       throw new Error(
         `Execution policy exceeded maxSteps=${this.policy.maxSteps} for workflow "${this.workflowName}"`,
       );
