@@ -1,17 +1,57 @@
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { join, resolve } from "path";
 import {
   WorkflowExecutionPolicy,
   WorkflowRunRecord,
   WorkflowStepRecord,
 } from "../core/types";
+import { env } from "../config/env";
 
 const store = new Map<string, unknown>();
 const runStore = new Map<string, WorkflowRunRecord>();
+const runStorageDir = resolve(process.cwd(), env.RUN_STORAGE_DIR);
 
 interface CreateRunMemoryInput {
   runId: string;
   workflowName: string;
   input: string;
   policy: WorkflowExecutionPolicy;
+}
+
+function ensureRunStorageDir(): void {
+  if (!existsSync(runStorageDir)) {
+    mkdirSync(runStorageDir, { recursive: true });
+  }
+}
+
+function getRunFilePath(runId: string): string {
+  return join(runStorageDir, `${runId}.json`);
+}
+
+function persistRun(run: WorkflowRunRecord): void {
+  ensureRunStorageDir();
+  writeFileSync(getRunFilePath(run.runId), JSON.stringify(run, null, 2), "utf-8");
+}
+
+function loadPersistedRuns(): void {
+  ensureRunStorageDir();
+
+  for (const fileName of readdirSync(runStorageDir)) {
+    if (!fileName.endsWith(".json")) {
+      continue;
+    }
+
+    const fullPath = join(runStorageDir, fileName);
+
+    try {
+      const content = readFileSync(fullPath, "utf-8");
+      const run = JSON.parse(content) as WorkflowRunRecord;
+      runStore.set(run.runId, run);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[memory] Failed to load persisted run from "${fullPath}": ${message}`);
+    }
+  }
 }
 
 export function save(key: string, value: unknown): void {
@@ -39,17 +79,20 @@ export function createRunMemory(input: CreateRunMemoryInput): WorkflowRunRecord 
   };
 
   runStore.set(input.runId, record);
+  persistRun(record);
   return record;
 }
 
 export function saveRunArtifact(runId: string, key: string, value: unknown): void {
   const run = getRunMemory(runId);
   run.artifacts[key] = value;
+  persistRun(run);
 }
 
 export function appendRunStep(runId: string, step: WorkflowStepRecord): void {
   const run = getRunMemory(runId);
   run.steps.push(step);
+  persistRun(run);
 }
 
 export function updateRunStep(runId: string, stepId: string, updates: Partial<WorkflowStepRecord>): void {
@@ -61,12 +104,14 @@ export function updateRunStep(runId: string, stepId: string, updates: Partial<Wo
   }
 
   Object.assign(step, updates);
+  persistRun(run);
 }
 
 export function completeRun(runId: string): WorkflowRunRecord {
   const run = getRunMemory(runId);
   run.status = "completed";
   run.completedAt = new Date().toISOString();
+  persistRun(run);
   return run;
 }
 
@@ -75,6 +120,7 @@ export function failRun(runId: string, error: string): WorkflowRunRecord {
   run.status = "failed";
   run.completedAt = new Date().toISOString();
   run.error = error;
+  persistRun(run);
   return run;
 }
 
@@ -90,3 +136,5 @@ export function getRunMemory(runId: string): WorkflowRunRecord {
 export function getAllRunMemories(): WorkflowRunRecord[] {
   return Array.from(runStore.values());
 }
+
+loadPersistedRuns();
