@@ -10,6 +10,11 @@
     "test": "npm run build && node --test dist/test/**/*.test.js",
     "evals": "RUN_STORAGE_DIR=.eval-runs ts-node src/evals/runEvals.ts",
     "evals:report": "RUN_STORAGE_DIR=.eval-runs ts-node src/evals/runEvals.ts --output .eval-reports/latest.json",
+    "evals:baseline": "ts-node src/evals/createEvalBaseline.ts --report .eval-reports/latest.json --output evals/baseline.json",
+    "evals:refresh-baseline": "npm run evals:report && npm run evals:baseline",
+    "evals:compare": "ts-node src/evals/compareEvalReports.ts",
+    "evals:gate": "npm run evals:report && npm run evals:compare -- --baseline evals/baseline.json --candidate .eval-reports/latest.json",
+    "ci:local": "bash ./scripts/ci-local.sh",
     "start:api": "node dist/server.js"
   },
   "dependencies": {

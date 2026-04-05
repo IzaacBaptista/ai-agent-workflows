@@ -9,6 +9,7 @@ import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 import { runBugWorkflow } from "../workflows/bugWorkflow";
 import { runIssueWorkflow } from "../workflows/issueWorkflow";
 import { runPRReviewWorkflow } from "../workflows/prReviewWorkflow";
+import { EvalReport } from "./reportTypes";
 import { EvalCheck, EvalExecutionContext, EvalScenario, getEvalScenarios } from "./scenarios";
 
 interface ScenarioExecutionResult {
@@ -18,34 +19,6 @@ interface ScenarioExecutionResult {
   runId?: string;
   notes: string[];
   error?: string;
-}
-
-interface EvalReportCheck {
-  label: string;
-  passed: boolean;
-  details?: string;
-}
-
-interface EvalReportScenario {
-  id: string;
-  workflow: EvalScenario["workflow"];
-  description: string;
-  passed: boolean;
-  runId?: string;
-  error?: string;
-  notes: string[];
-  checks: EvalReportCheck[];
-}
-
-interface EvalReport {
-  generatedAt: string;
-  runStorageDir: string;
-  scenarioCount: number;
-  passedScenarioCount: number;
-  totalChecks: number;
-  passedChecks: number;
-  failedScenarioIds: string[];
-  scenarios: EvalReportScenario[];
 }
 
 function isIsolatedEvalStorage(): boolean {

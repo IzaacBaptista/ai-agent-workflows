@@ -185,6 +185,7 @@ src/
 ├── agents/               # Planner, replanner, critic, reviewer, triage/final agents, and agent registry
 ├── core/                 # BaseAgent, action schemas, LLM client, workflow runtime, and shared types
 ├── config/               # Environment variable loading
+├── evals/                # Eval runner, baseline comparison helpers, and scenario definitions
 ├── helpers/              # Prompt loading, memory/planning context builders, workflow guidance, and GitHub helpers
 ├── integrations/
 │   └── github/           # postPRComment (GitHub REST API write operations)
@@ -192,6 +193,8 @@ src/
 ├── test/                 # Runtime, workflow, tool, parser, and HTTP-layer tests
 ├── tools/                # Structured logging, repository tools, allowlisted command execution, and tool registry/executor
 └── workflows/            # Runtime-driven workflow definitions for issue, bug, and PR review
+evals/                    # Committed eval baseline used by the regression gate
+scripts/                  # Local CI helpers such as the eval-aware gate script
 prompts/                  # Operational JSON-first prompts for planner, replanner, critic, reviewer, triage, and final analysis
 ```
 
@@ -453,6 +456,31 @@ npm run evals -- --list
 npm run evals -- --scenario pr-uses-git-context-tools
 npm run evals -- --output .eval-reports/custom.json
 ```
+
+Create or refresh the committed eval baseline from the latest green report with:
+
+```bash
+npm run evals:refresh-baseline
+```
+
+Compare a candidate report against the committed baseline with:
+
+```bash
+npm run evals:compare -- --baseline evals/baseline.json --candidate .eval-reports/latest.json
+```
+
+Run the full local CI gate, including lint, tests, eval report generation, and baseline regression detection, with:
+
+```bash
+npm run ci:local
+```
+
+The eval gate works in two layers:
+
+- `npm run evals:report` already fails if any current scenario or check fails outright.
+- `npm run evals:compare` fails if a candidate report regresses any baseline scenario or required check, which makes branch-to-branch behavior regressions visible even when the overall suite still passes.
+
+`evals/baseline.json` should be committed. `.eval-reports/latest.json` remains ephemeral local/CI output.
 
 The eval harness uses isolated `.eval-runs` storage and checks scenario-level behavior such as:
 
