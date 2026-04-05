@@ -1231,7 +1231,7 @@ test("loadPersistedRuns sanitizes run files with missing artifacts", () => {
       "artifacts should be sanitized to an empty object when missing from disk",
     );
     assert.doesNotThrow(() => {
-      const _ = loaded.artifacts["forcedFinalAnalysisReason"];
+      loaded.artifacts["forcedFinalAnalysisReason"];
     }, "accessing artifacts properties should not throw after sanitization");
   } finally {
     fs.rmSync(legacyRunFile, { force: true });

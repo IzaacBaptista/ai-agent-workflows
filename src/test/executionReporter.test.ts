@@ -482,26 +482,31 @@ test("parseCliArgs reads output mode and falls back to raw when invalid", () => 
   assert.equal(invalidArgs.outputMode, "raw");
 });
 
+function createRunRecordWithoutArtifacts(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
+  const record = createRunRecord(overrides);
+  return { ...record, artifacts: undefined as unknown as Record<string, unknown> };
+}
+
 test("getBehaviorSignal does not throw when runRecord.artifacts is missing", () => {
   const meta = createMeta({ status: "failed", stepCount: 0 });
-  const runRecordWithoutArtifacts = {
-    ...createRunRecord({ status: "failed", error: "Cannot read properties of undefined" }),
-    artifacts: undefined as unknown as Record<string, unknown>,
-  };
+  const runRecord = createRunRecordWithoutArtifacts({
+    status: "failed",
+    error: "Cannot read properties of undefined",
+  });
 
-  assert.doesNotThrow(() => getBehaviorSignal(meta, runRecordWithoutArtifacts));
+  assert.doesNotThrow(() => getBehaviorSignal(meta, runRecord));
 });
 
 test("RunSummaryFormatter does not throw when runRecord.artifacts is missing", () => {
-  const runRecordWithoutArtifacts = {
-    ...createRunRecord({ status: "failed", error: "Cannot read properties of undefined" }),
-    artifacts: undefined as unknown as Record<string, unknown>,
-  };
+  const runRecord = createRunRecordWithoutArtifacts({
+    status: "failed",
+    error: "Cannot read properties of undefined",
+  });
   const result: WorkflowResult<unknown> = {
     success: false,
     error: "Cannot read properties of undefined",
     meta: createMeta({ status: "failed", stepCount: 0 }),
   };
 
-  assert.doesNotThrow(() => RunSummaryFormatter.format({ result, runRecord: runRecordWithoutArtifacts }));
+  assert.doesNotThrow(() => RunSummaryFormatter.format({ result, runRecord }));
 });
