@@ -2,6 +2,11 @@
 
 A local CLI application that runs AI-powered workflows for common engineering tasks: issue analysis, bug diagnosis, and pull request review.
 
+## Documentation map
+
+- [Product vision](./docs/product.md): what the product is, who it is for, and what the roadmap prioritizes
+- [Architecture](./docs/architecture.md): how the current runtime is structured and how it works
+
 ## What it does
 
 This project exposes three structured AI workflows:
