@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { GitDiffResult, GitStatusEntry, GitStatusResult } from "../core/types";
+import { GitDiffResult, GitLogEntry, GitLogResult, GitStatusEntry, GitStatusResult } from "../core/types";
 
 interface SpawnResult {
   stdout: string;
@@ -11,9 +11,12 @@ interface SpawnResult {
 interface GitToolExecutor {
   getStatus(cwd?: string): Promise<GitStatusResult>;
   getDiff(staged: boolean, cwd?: string): Promise<GitDiffResult>;
+  getLog(path?: string, maxCommits?: number, cwd?: string): Promise<GitLogResult>;
 }
 
 const MAX_DIFF_CHARS = 8000;
+const MAX_LOG_COMMITS = 20;
+const UNIT_SEP = "\x1f";
 
 function truncateDiff(value: string): { diff: string; truncated: boolean } {
   if (value.length <= MAX_DIFF_CHARS) {
@@ -108,15 +111,78 @@ async function defaultGitToolExecutorDiff(staged: boolean, cwd?: string): Promis
   };
 }
 
+function parseGitLog(output: string, query?: string): GitLogResult {
+  const commits: GitLogEntry[] = [];
+  let currentEntry: { hash: string; subject: string; author: string; date: string; files: string[] } | null = null;
+
+  for (const rawLine of output.split("\n")) {
+    const line = rawLine.trimEnd();
+
+    if (line.includes(UNIT_SEP)) {
+      if (currentEntry) {
+        commits.push(currentEntry);
+      }
+
+      const parts = line.split(UNIT_SEP);
+      currentEntry = {
+        hash: (parts[0] ?? "").trim(),
+        subject: (parts[1] ?? "").trim(),
+        author: (parts[2] ?? "").trim(),
+        date: (parts[3] ?? "").trim(),
+        files: [],
+      };
+    } else if (currentEntry && line.trim().length > 0) {
+      currentEntry.files.push(line.trim());
+    }
+  }
+
+  if (currentEntry) {
+    commits.push(currentEntry);
+  }
+
+  return { commits, query, truncated: false };
+}
+
+async function defaultGitToolExecutorLog(
+  path?: string,
+  maxCommits?: number,
+  cwd?: string,
+): Promise<GitLogResult> {
+  const limit = Math.min(Math.max(1, maxCommits ?? 10), MAX_LOG_COMMITS);
+  const format = `%H${UNIT_SEP}%s${UNIT_SEP}%an${UNIT_SEP}%ad`;
+  const args = [
+    "log",
+    `--pretty=format:${format}`,
+    "--date=short",
+    "--name-only",
+    `-n`,
+    String(limit),
+  ];
+
+  if (path && path.trim().length > 0) {
+    args.push("--", path.trim());
+  }
+
+  const result = await runGitCommand(args, cwd);
+
+  if (result.exitCode !== 0) {
+    throw new Error(`git log failed: ${result.stderr.trim() || `exit code ${result.exitCode ?? "null"}`}`);
+  }
+
+  return parseGitLog(result.stdout, path);
+}
+
 let gitToolExecutor: GitToolExecutor = {
   getStatus: defaultGitToolExecutorStatus,
   getDiff: defaultGitToolExecutorDiff,
+  getLog: defaultGitToolExecutorLog,
 };
 
-export function setGitToolExecutorForTesting(executor?: GitToolExecutor): void {
-  gitToolExecutor = executor ?? {
-    getStatus: defaultGitToolExecutorStatus,
-    getDiff: defaultGitToolExecutorDiff,
+export function setGitToolExecutorForTesting(executor?: Partial<GitToolExecutor>): void {
+  gitToolExecutor = {
+    getStatus: executor?.getStatus ?? defaultGitToolExecutorStatus,
+    getDiff: executor?.getDiff ?? defaultGitToolExecutorDiff,
+    getLog: executor?.getLog ?? defaultGitToolExecutorLog,
   };
 }
 
@@ -134,4 +200,8 @@ export async function getGitDiff(staged = false): Promise<GitDiffResult> {
 
 export async function getGitDiffAt(cwd: string, staged = false): Promise<GitDiffResult> {
   return gitToolExecutor.getDiff(staged, cwd);
+}
+
+export async function getGitLog(path?: string, maxCommits?: number): Promise<GitLogResult> {
+  return gitToolExecutor.getLog(path, maxCommits);
 }

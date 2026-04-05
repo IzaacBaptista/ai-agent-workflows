@@ -431,6 +431,7 @@ export class WorkflowRuntime {
         artifacts.patchResults ||
         artifacts.gitStatusResult ||
         artifacts.gitDiffResult ||
+        artifacts.gitLogResult ||
         artifacts.externalApiResult,
     );
   }
@@ -440,7 +441,7 @@ export class WorkflowRuntime {
       return false;
     }
 
-    if (!["search_code", "read_file", "git_status", "git_diff"].includes(action.toolName)) {
+    if (!["search_code", "read_file", "git_status", "git_diff", "git_log"].includes(action.toolName)) {
       return false;
     }
 
@@ -783,6 +784,8 @@ export class WorkflowRuntime {
       this.saveArtifact("gitStatusResult", result.data);
     } else if (toolName === "git_diff") {
       this.saveArtifact("gitDiffResult", result.data);
+    } else if (toolName === "git_log") {
+      this.saveArtifact("gitLogResult", result.data);
     } else {
       this.saveArtifact("externalApiResult", result.data);
     }

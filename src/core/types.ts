@@ -7,6 +7,7 @@ export const WORKFLOW_TOOL_NAMES = [
   "run_command",
   "git_status",
   "git_diff",
+  "git_log",
 ] as const;
 export type WorkflowToolName = typeof WORKFLOW_TOOL_NAMES[number];
 export type WorkflowCommandName = "build" | "test" | "lint";
@@ -21,6 +22,9 @@ export const REGISTERED_AGENT_NAMES = [
   "IssueAgent",
   "BugAgent",
   "PRAgent",
+  "JiraAnalyzeAgent",
+  "PRCreateAgent",
+  "RepoInvestigateAgent",
 ] as const;
 export type RegisteredAgentName = typeof REGISTERED_AGENT_NAMES[number];
 export type RuntimeActionType =
@@ -148,6 +152,7 @@ export interface WorkflowExecutionMeta {
   maxDelegationDepthReached: number;
   memoryHits: number;
   criticRedirectCount: number;
+  jiraIssueKey?: string;
   githubComment?: {
     posted: boolean;
     error?: string;
@@ -367,4 +372,48 @@ export interface PRTriage {
   reviewFocus: string[];
   codeSearchTerms: string[];
   regressionChecks: string[];
+}
+
+export interface JiraAnalysis {
+  summary: string;
+  implementationPlan: string[];
+  acceptanceCriteria: string[];
+  risks: string[];
+  testScenarios: string[];
+  suggestedBranchName: string;
+  suggestedPRTitle: string;
+}
+
+export interface PRCreatePlan {
+  title: string;
+  description: string;
+  suggestedBranchName: string;
+  labels: string[];
+}
+
+export interface PRCreateResult extends PRCreatePlan {
+  prUrl?: string;
+  prNumber?: number;
+}
+
+export interface RepoInvestigationResult {
+  summary: string;
+  relevantFiles: string[];
+  codePatterns: string[];
+  hypotheses: string[];
+  nextSteps: string[];
+}
+
+export interface GitLogEntry {
+  hash: string;
+  subject: string;
+  author: string;
+  date: string;
+  files: string[];
+}
+
+export interface GitLogResult {
+  commits: GitLogEntry[];
+  query?: string;
+  truncated: boolean;
 }

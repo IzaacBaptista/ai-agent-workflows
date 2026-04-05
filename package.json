@@ -2,6 +2,9 @@
   "name": "ai-agent-workflows",
   "version": "1.0.0",
   "main": "dist/index.js",
+  "bin": {
+    "ai": "dist/index.js"
+  },
   "scripts": {
     "dev": "ts-node src/index.ts",
     "dev:api": "ts-node src/server.ts",

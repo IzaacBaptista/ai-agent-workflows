@@ -1,21 +1,25 @@
 import { normalizeOutputMode, OutputMode } from "../reporting/reportingTypes";
 
-export interface ParsedCliArgs {
-  command?: string;
-  input: string;
-  outputMode: OutputMode;
-}
+export type ParsedCliCommand =
+  | { kind: "jira-issue"; issueKey: string; outputMode: OutputMode }
+  | { kind: "jira-analyze"; issueKey: string; outputMode: OutputMode }
+  | { kind: "github-pr-review"; input: string; outputMode: OutputMode }
+  | { kind: "github-pr-create"; issueKey: string; outputMode: OutputMode }
+  | { kind: "repo-investigate"; query: string; outputMode: OutputMode }
+  | { kind: "issue"; input: string; outputMode: OutputMode }
+  | { kind: "bug"; input: string; outputMode: OutputMode }
+  | { kind: "pr"; input: string; outputMode: OutputMode }
+  | { kind: "unknown"; raw: string[] };
 
-export function parseCliArgs(argv: string[]): ParsedCliArgs {
-  const [, , command, ...rest] = argv;
-  const inputTokens: string[] = [];
+function extractOutputMode(tokens: string[]): { outputMode: OutputMode; remaining: string[] } {
+  const remaining: string[] = [];
   let requestedOutputMode: string | undefined;
 
-  for (let index = 0; index < rest.length; index += 1) {
-    const token = rest[index];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
 
     if (token === "--output" || token === "-o") {
-      requestedOutputMode = rest[index + 1];
+      requestedOutputMode = tokens[index + 1];
       index += 1;
       continue;
     }
@@ -30,12 +34,79 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
       continue;
     }
 
-    inputTokens.push(token);
+    remaining.push(token);
   }
 
-  return {
-    command,
-    input: inputTokens.join(" ").trim(),
-    outputMode: normalizeOutputMode(requestedOutputMode),
-  };
+  return { outputMode: normalizeOutputMode(requestedOutputMode), remaining };
+}
+
+export function parseCliArgs(argv: string[]): ParsedCliCommand {
+  const [, , namespace, ...afterNamespace] = argv;
+
+  if (!namespace) {
+    return { kind: "unknown", raw: [] };
+  }
+
+  const { outputMode, remaining } = extractOutputMode(afterNamespace);
+
+  // Namespaced commands: ai jira <subcommand> <arg>
+  if (namespace === "jira") {
+    const [subcommand, ...rest] = remaining;
+    const arg = rest.join(" ").trim();
+
+    if (subcommand === "issue" && arg) {
+      return { kind: "jira-issue", issueKey: arg, outputMode };
+    }
+
+    if (subcommand === "analyze" && arg) {
+      return { kind: "jira-analyze", issueKey: arg, outputMode };
+    }
+
+    return { kind: "unknown", raw: [namespace, subcommand ?? "", ...rest] };
+  }
+
+  // Namespaced commands: ai github pr <subcommand> <arg>
+  if (namespace === "github") {
+    const [subA, subB, ...rest] = remaining;
+    const arg = rest.join(" ").trim();
+
+    if (subA === "pr" && subB === "review" && arg) {
+      return { kind: "github-pr-review", input: arg, outputMode };
+    }
+
+    if (subA === "pr" && subB === "create" && arg) {
+      return { kind: "github-pr-create", issueKey: arg, outputMode };
+    }
+
+    return { kind: "unknown", raw: [namespace, subA ?? "", subB ?? "", ...rest] };
+  }
+
+  // Namespaced command: ai repo investigate "<query>"
+  if (namespace === "repo") {
+    const [subcommand, ...rest] = remaining;
+    const query = rest.join(" ").trim();
+
+    if (subcommand === "investigate" && query) {
+      return { kind: "repo-investigate", query, outputMode };
+    }
+
+    return { kind: "unknown", raw: [namespace, subcommand ?? "", ...rest] };
+  }
+
+  // Flat backward-compatible commands: ai issue "...", ai bug "...", ai pr "..."
+  const input = remaining.join(" ").trim();
+
+  if (namespace === "issue") {
+    return { kind: "issue", input, outputMode };
+  }
+
+  if (namespace === "bug") {
+    return { kind: "bug", input, outputMode };
+  }
+
+  if (namespace === "pr") {
+    return { kind: "pr", input, outputMode };
+  }
+
+  return { kind: "unknown", raw: [namespace, ...remaining] };
 }
