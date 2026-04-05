@@ -210,6 +210,12 @@ All three workflows follow the same execution pattern:
 13. Isolated and reversible patch validation
    evaluates `edit_patch` inside a temporary Git worktree, compares validation before/after, records the isolated diff, and gives the critic enough evidence to reject regressive or overly broad patches.
 
+## Runtime overview
+
+The diagram below shows the current V1 shape of the product: a CLI and HTTP API that route into issue, bug, and PR workflows, all orchestrated by `workflowRuntime.ts` with guarded tools, critique, persistence, and human-readable outputs.
+
+![AI Agent Workflows runtime overview](image.png)
+
 ## Project structure
 
 ```
