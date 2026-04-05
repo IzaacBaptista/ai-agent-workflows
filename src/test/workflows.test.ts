@@ -118,6 +118,190 @@ test("runIssueWorkflow executes model-driven tool call and finalize", async () =
   }
 });
 
+test("runIssueWorkflow blocks repo-local finalize without code evidence and forces a search first", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  const responses = [
+    buildLlmResponse({
+      summary: "Issue workflow plan",
+      actions: [
+        {
+          type: "analyze",
+          stage: "triage",
+          task: "Collect repo-local issue context",
+          reason: "Need triage first",
+        },
+        {
+          type: "finalize",
+          task: "Produce the issue analysis",
+          reason: "Try to finalize directly",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Issue triage summary",
+      investigationAreas: ["WorkflowRuntime timeout cleanup"],
+      codeSearchTerms: ["WorkflowRuntime", "setTimeout"],
+      validationChecks: ["confirm cleanup path"],
+    }),
+    buildLlmResponse({
+      summary: "Finalize directly after triage",
+      actions: [
+        {
+          type: "finalize",
+          task: "Produce the issue analysis",
+          reason: "Assume triage is enough",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Finalize after code search",
+      actions: [
+        {
+          type: "finalize",
+          task: "Produce the issue analysis",
+          reason: "Code evidence is now available",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Issue analysis summary",
+      questions: ["Can it be reproduced?"],
+      acceptanceCriteria: ["WorkflowRuntime cleanup is explained"],
+      technicalPlan: ["Inspect WorkflowRuntime timeout lifecycle"],
+      testScenarios: ["Run the hanging timer path"],
+      risks: ["Regression in runtime cleanup"],
+      assumptions: ["Repository-local runtime issue"],
+    }),
+    buildLlmResponse({
+      approved: true,
+      summary: "Looks good",
+      missingEvidence: [],
+      confidence: "high",
+    }),
+  ];
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const result = await runIssueWorkflow("WorkflowRuntime timeouts are not cleared in this repo");
+
+    assert.equal(result.success, true);
+    if (!result.success) {
+      return;
+    }
+
+    assert.equal(result.meta.toolCallCount, 1);
+    const runRecord = getRunMemory(result.meta.runId);
+    assert.equal(
+      runRecord.steps.some(
+        (step) => step.blocked === true && step.actionType === "finalize",
+      ),
+      true,
+    );
+    assert.equal(
+      runRecord.steps.some(
+        (step) =>
+          step.actionType === "tool_call" &&
+          step.toolName === "search_code" &&
+          step.status === "completed" &&
+          !step.blocked,
+      ),
+      true,
+    );
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+  }
+});
+
+test("runIssueWorkflow still allows non-repo-local issues to finalize without forced code evidence", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  const responses = [
+    buildLlmResponse({
+      summary: "Issue workflow plan",
+      actions: [
+        {
+          type: "analyze",
+          stage: "triage",
+          task: "Collect product issue context",
+          reason: "Need triage first",
+        },
+        {
+          type: "finalize",
+          task: "Produce the issue analysis",
+          reason: "Finalize after triage",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Issue triage summary",
+      investigationAreas: ["login flow"],
+      codeSearchTerms: ["auth flow"],
+      validationChecks: ["confirm reproduction"],
+    }),
+    buildLlmResponse({
+      summary: "Finalize after triage",
+      actions: [
+        {
+          type: "finalize",
+          task: "Produce the issue analysis",
+          reason: "Triage is enough for this non-repo-local issue",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Issue analysis summary",
+      questions: ["Can it be reproduced?"],
+      acceptanceCriteria: ["Issue is resolved"],
+      technicalPlan: ["Inspect auth flow"],
+      testScenarios: ["Reset password then login"],
+      risks: ["Regression in auth"],
+      assumptions: ["Backend issue"],
+    }),
+    buildLlmResponse({
+      approved: true,
+      summary: "Looks good",
+      missingEvidence: [],
+      confidence: "high",
+    }),
+  ];
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const result = await runIssueWorkflow("User cannot login after password reset");
+
+    assert.equal(result.success, true);
+    if (!result.success) {
+      return;
+    }
+
+    assert.equal(result.meta.toolCallCount, 0);
+    const runRecord = getRunMemory(result.meta.runId);
+    assert.equal(
+      runRecord.steps.some(
+        (step) => step.blocked === true && step.actionType === "finalize",
+      ),
+      false,
+    );
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+  }
+});
+
 test("runBugWorkflow uses relevant memory in planner input to avoid a repeated tool loop", async () => {
   const priorRuntime = new WorkflowRuntime({
     workflowName: "BugWorkflow",

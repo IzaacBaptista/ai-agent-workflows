@@ -113,6 +113,72 @@ function buildReplanContext(
   ].join("\n");
 }
 
+const REPO_LOCAL_PHRASES = ["this repo", "this repository", "codebase", "project"];
+const REPO_LOCAL_IDENTIFIERS = [
+  "WorkflowRuntime",
+  "PlannerAgent",
+  "ReplannerAgent",
+  "CriticAgent",
+  "IssueWorkflow",
+  "BugWorkflow",
+  "PRReviewWorkflow",
+  "search_code",
+  "read_file",
+  "run_command",
+  "edit_patch",
+];
+
+function isClearlyRepoLocalIssue(issue: string): boolean {
+  const normalized = issue.toLowerCase();
+
+  if (REPO_LOCAL_PHRASES.some((phrase) => normalized.includes(phrase))) {
+    return true;
+  }
+
+  if (/\bsrc\//i.test(issue) || /\bpackage\.json\b/i.test(issue) || /\breadme\b/i.test(issue)) {
+    return true;
+  }
+
+  if (/\b[a-z0-9_./-]+\.(?:ts|js|md|json)\b/i.test(issue)) {
+    return true;
+  }
+
+  return REPO_LOCAL_IDENTIFIERS.some((identifier) => normalized.includes(identifier.toLowerCase()));
+}
+
+function hasSuccessfulIssueCodeEvidence(runtime: WorkflowRuntime): boolean {
+  const toolCalls = runtime.getRunRecord().artifacts.toolCalls as
+    | Array<{ toolName: string; result?: unknown }>
+    | undefined;
+
+  return (toolCalls ?? []).some(
+    (record) =>
+      (record.toolName === "search_code" || record.toolName === "read_file") && record.result != null,
+  );
+}
+
+function extractIssueSearchTerms(issue: string): string[] {
+  const identifierTerms = REPO_LOCAL_IDENTIFIERS.filter((identifier) =>
+    issue.toLowerCase().includes(identifier.toLowerCase()),
+  );
+  const fileTerms = Array.from(
+    new Set(
+      Array.from(
+        issue.matchAll(/\b(?:src\/[A-Za-z0-9_./-]+|package\.json|README|[A-Za-z0-9_-]+\.(?:ts|js|md|json))\b/g),
+      ).map((match) => match[0]),
+    ),
+  );
+  const genericTerms = Array.from(
+    new Set(
+      Array.from(issue.matchAll(/\b[A-Za-z][A-Za-z0-9_]{4,}\b/g))
+        .map((match) => match[0])
+        .filter((term) => !REPO_LOCAL_PHRASES.includes(term.toLowerCase())),
+    ),
+  );
+
+  return [...identifierTerms, ...fileTerms, ...genericTerms].slice(0, 3);
+}
+
 const issueWorkflowDefinition: WorkflowDefinition<IssueTriage, IssueAnalysis> = {
   workflowName: "IssueWorkflow",
   triageAgentName: "IssueTriageAgent",
@@ -163,6 +229,33 @@ const issueWorkflowDefinition: WorkflowDefinition<IssueTriage, IssueAnalysis> = 
     buildIssueCritiqueContext(input, finalContext),
   buildReplanContext: (input, completedAction, runtime, remainingActions) =>
     buildReplanContext(input, completedAction, runtime, remainingActions),
+  beforeFinalize: (input, runtime, state, action) => {
+    if (typeof runtime.getRunRecord().artifacts.forcedFinalAnalysisReason === "string") {
+      return null;
+    }
+
+    if (!isClearlyRepoLocalIssue(input) || hasSuccessfulIssueCodeEvidence(runtime)) {
+      return null;
+    }
+
+    const searchTerms =
+      state.triage?.codeSearchTerms?.slice(0, 3).filter((term) => term.trim().length > 0) ??
+      [];
+    const recoveryTerms = searchTerms.length > 0 ? searchTerms : extractIssueSearchTerms(input);
+
+    return {
+      reason: "Repo-local issues require at least one code-inspection step before finalization.",
+      recoveryActions: [
+        {
+          type: "tool_call",
+          toolName: "search_code",
+          input: { terms: recoveryTerms.length > 0 ? recoveryTerms : ["WorkflowRuntime"] },
+          reason: "Need at least one repository code-inspection step before finalizing a repo-local issue",
+        },
+        action,
+      ],
+    };
+  },
   summarizeTriage: (triage) => `investigationAreas=${triage.investigationAreas.length}`,
   summarizeResult: (result) => `questions=${result.questions.length}`,
 };

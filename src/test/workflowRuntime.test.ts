@@ -146,6 +146,50 @@ test("WorkflowRuntime allows critique immediately after finalize at the maxSteps
   assert.equal(steps[steps.length - 1]?.name, "critique");
 });
 
+test("WorkflowRuntime allows a terminal finalize after convergence at the maxSteps boundary", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "ReservedFinalizeWorkflow",
+    input: "reserved finalize input",
+    policy: {
+      maxSteps: 3,
+      maxRetriesPerStep: 0,
+      timeoutMs: 1000,
+    },
+  });
+
+  const definition = createDefinition({
+    workflowName: "ReservedFinalizeWorkflow",
+    runPlanner: async () => ({
+      summary: "analyze then finish after replan",
+      actions: [
+        {
+          type: "analyze",
+          stage: "triage",
+          task: "triage first",
+          reason: "triage before final answer",
+        },
+        {
+          type: "finalize",
+          task: "finish after convergence",
+          reason: "finish once replanning converges",
+        },
+      ],
+    }),
+    runReplanner: async () => ({
+      summary: "finalize only",
+      actions: [{ type: "finalize", task: "finish after convergence", reason: "ready to finish" }],
+    }),
+  });
+
+  const result = await runtime.runActionQueue(definition, "reserved finalize input");
+
+  assert.equal(result.note, "finish after convergence:1");
+  assert.equal(runtime.getMeta().critiqueCount, 1);
+  const steps = runtime.getRunRecord().steps;
+  assert.equal(steps[steps.length - 2]?.name, "finalize");
+  assert.equal(steps[steps.length - 1]?.name, "critique");
+});
+
 test("WorkflowRuntime retries failed step once when configured", async () => {
   const runtime = new WorkflowRuntime({
     workflowName: "RetryWorkflow",
@@ -251,6 +295,12 @@ test("WorkflowRuntime safely replans after an invalid tool request", async () =>
     true,
   );
   assert.equal((runtime.getRunRecord().artifacts.validationErrors as unknown[]).length, 1);
+  assert.equal(
+    runtime.getRunRecord().steps.some(
+      (step) => step.blocked === true && step.actionType === "tool_call" && step.toolName === "unknown_tool",
+    ),
+    true,
+  );
 });
 
 test("WorkflowRuntime applies edit_patch and validates it with run_command", async () => {
@@ -552,6 +602,12 @@ test("WorkflowRuntime safely replans after an invalid delegation target", async 
 
   assert.equal(result.note, "finish after invalid delegation:1");
   assert.equal((runtime.getRunRecord().artifacts.validationErrors as unknown[]).length, 1);
+  assert.equal(
+    runtime.getRunRecord().steps.some(
+      (step) => step.blocked === true && step.actionType === "delegate" && step.targetAgent === "UnknownAgent",
+    ),
+    true,
+  );
 });
 
 test("WorkflowRuntime suppresses repeated identical tool calls and reuses cached result", async () => {

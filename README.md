@@ -112,6 +112,18 @@ EXTERNAL_API_TIMEOUT_MS=5000
 npm run dev -- <command> "<input text>"
 ```
 
+You can also choose the final presentation layer:
+
+```bash
+npm run dev -- <command> "<input text>" --output raw
+npm run dev -- <command> "<input text>" --output summary
+npm run dev -- <command> "<input text>" --output timeline
+```
+
+- `raw` preserves the current behavior: structured runtime logs plus the final JSON result.
+- `summary` keeps the raw logs and adds a short human-readable run summary before the final JSON result.
+- `timeline` keeps the raw logs and adds a grouped step-by-step timeline before the final JSON result.
+
 ### Issue analysis
 
 ```bash
@@ -197,6 +209,7 @@ All three workflows follow the same execution pattern:
 
 ```
 src/
+├── cli/                  # CLI argument parsing and output-mode selection
 ├── index.ts              # CLI entrypoint
 ├── server.ts             # Express API entrypoint and run inspection endpoints
 ├── agents/               # Planner, replanner, critic, reviewer, coder, triage/final agents, and agent registry
@@ -207,6 +220,7 @@ src/
 ├── integrations/
 │   └── github/           # postPRComment (GitHub REST API write operations)
 ├── memory/               # Persisted run store, working memory snapshots, and relevant-memory retrieval
+├── reporting/            # Human-readable execution summaries and timelines built from persisted run records
 ├── test/                 # Runtime, workflow, tool, parser, and HTTP-layer tests
 ├── tools/                # Structured logging, repository tools, controlled patch application, allowlisted command execution, and tool registry/executor
 └── workflows/            # Runtime-driven workflow definitions for issue, bug, and PR review

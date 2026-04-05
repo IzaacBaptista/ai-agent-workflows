@@ -119,6 +119,7 @@ export interface WorkflowStepRecord {
   delegationDepth?: number;
   signature?: string;
   suppressed?: boolean;
+  blocked?: boolean;
 }
 
 export interface WorkflowRunRecord {

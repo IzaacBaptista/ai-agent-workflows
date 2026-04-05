@@ -74,6 +74,8 @@ interface ExecuteStepOptions {
   delegationDepth?: number;
   signature?: string;
   suppressed?: boolean;
+  blocked?: boolean;
+  reservedBudgetStep?: boolean;
 }
 
 interface RuntimeProgressState {
@@ -136,6 +138,12 @@ export interface WorkflowDefinition<TTriage, TResult> {
     runtime: WorkflowRuntime,
     remainingActions: RuntimeAction[],
   ) => string;
+  beforeFinalize?: (
+    input: string,
+    runtime: WorkflowRuntime,
+    state: WorkflowExecutionState<TTriage, TResult>,
+    action: Extract<RuntimeAction, { type: "finalize" }>,
+  ) => { reason: string; recoveryActions: RuntimeAction[] } | null;
   summarizeTriage?: (triage: TTriage) => string;
   summarizeResult?: (result: TResult) => string;
 }
@@ -456,13 +464,7 @@ export class WorkflowRuntime {
     options: ExecuteStepOptions = {},
   ): Promise<T> {
     this.stepCount += 1;
-    const previousStep = this.getRunRecord().steps[this.getRunRecord().steps.length - 1];
-    const isReservedCritiqueStep =
-      name === "critique" &&
-      previousStep?.name === "finalize" &&
-      previousStep.status === "completed";
-
-    if (this.stepCount > this.policy.maxSteps && !isReservedCritiqueStep) {
+    if (this.stepCount > this.policy.maxSteps && !options.reservedBudgetStep) {
       throw new Error(
         `Execution policy exceeded maxSteps=${this.policy.maxSteps} for workflow "${this.workflowName}"`,
       );
@@ -489,6 +491,7 @@ export class WorkflowRuntime {
         delegationDepth: options.delegationDepth,
         signature: options.signature,
         suppressed: options.suppressed,
+        blocked: options.blocked,
       };
 
       appendRunStep(this.runId, stepRecord);
@@ -549,12 +552,43 @@ export class WorkflowRuntime {
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
+  private recordBlockedAction(action: RuntimeAction, reason: string, delegationDepth?: number): void {
+    this.stepCount += 1;
+    const timestamp = new Date().toISOString();
+    const stepRecord: WorkflowStepRecord = {
+      stepId: `${action.type}:${this.stepCount}:1`,
+      name: action.type,
+      status: "completed",
+      attempt: 1,
+      startedAt: timestamp,
+      completedAt: timestamp,
+      inputSummary:
+        action.type === "tool_call" || action.type === "replan"
+          ? action.reason
+          : action.task,
+      outputSummary: `blocked: ${reason}`,
+      actionType: action.type,
+      toolName: action.type === "tool_call" ? action.toolName : undefined,
+      targetAgent: action.type === "delegate" ? action.targetAgent : undefined,
+      delegationDepth,
+      signature:
+        action.type === "tool_call"
+          ? `${action.toolName}:${action.reason.trim().toLowerCase()}`
+          : `${action.type}:${("task" in action ? action.task : action.reason).trim().toLowerCase()}`,
+      blocked: true,
+    };
+
+    appendRunStep(this.runId, stepRecord);
+    logWorkflowStep(this.workflowName, stepRecord);
+  }
+
   private async executeToolAction(action: RuntimeAction): Promise<WorkflowToolResult | undefined> {
     if (action.type !== "tool_call") {
       return undefined;
     }
 
     if (!isRegisteredWorkflowTool(action.toolName)) {
+      this.recordBlockedAction(action, `Unknown workflow tool "${action.toolName}"`);
       const duplicate = this.recordValidationError(
         "tool",
         `Unknown workflow tool "${action.toolName}"`,
@@ -568,6 +602,7 @@ export class WorkflowRuntime {
 
     const validatedInput = validateWorkflowToolInput(action.toolName, action.input);
     if (!validatedInput.success) {
+      this.recordBlockedAction(action, `Invalid input for tool "${action.toolName}"`);
       const duplicate = this.recordValidationError(
         "tool",
         `Invalid input for tool "${action.toolName}": ${validatedInput.error}`,
@@ -582,6 +617,7 @@ export class WorkflowRuntime {
     const toolName = action.toolName;
     const stats = this.getStats();
     if (stats.toolCallCount >= this.policy.maxToolCalls) {
+      this.recordBlockedAction(action, `Tool call budget exceeded for ${action.toolName}`);
       this.forceFinalAnalysis(`Tool call budget exceeded for ${action.toolName}`);
       return undefined;
     }
@@ -603,6 +639,10 @@ export class WorkflowRuntime {
     );
 
     if (previousCalls.length > this.policy.maxRepeatedIdenticalToolCalls) {
+      this.recordBlockedAction(
+        action,
+        `Repeated identical tool_call exceeded limit for ${action.toolName}`,
+      );
       this.forceFinalAnalysis(`Repeated identical tool_call exceeded limit for ${action.toolName}`);
       return undefined;
     }
@@ -799,6 +839,10 @@ export class WorkflowRuntime {
     }
 
     if (action.files.length > this.policy.maxFilesPerEditAction) {
+      this.recordBlockedAction(
+        action,
+        `edit_patch requested too many files (${action.files.length})`,
+      );
       const duplicate = this.recordValidationError(
         "edit_patch",
         `edit_patch requested too many files (${action.files.length})`,
@@ -812,6 +856,7 @@ export class WorkflowRuntime {
 
     const stats = this.getStats();
     if (stats.editActionCount >= this.policy.maxEditActionsPerRun) {
+      this.recordBlockedAction(action, "Edit patch budget exceeded");
       this.forceFinalAnalysis("Edit patch budget exceeded");
       return undefined;
     }
@@ -830,6 +875,7 @@ export class WorkflowRuntime {
       isolatedWorkspace = await createIsolatedWorkspace();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      this.recordBlockedAction(action, message);
       const duplicate = this.recordValidationError("edit_patch", message, `${signature}:worktree`);
       if (duplicate) {
         throw error instanceof Error ? error : new Error(message);
@@ -1005,6 +1051,7 @@ export class WorkflowRuntime {
     }
 
     if (!isRegisteredAgentName(action.targetAgent)) {
+      this.recordBlockedAction(action, `Unknown target agent "${action.targetAgent}"`, depth);
       const duplicate = this.recordValidationError(
         "delegate",
         `Unknown target agent "${action.targetAgent}"`,
@@ -1018,6 +1065,11 @@ export class WorkflowRuntime {
 
     const targetAgent = action.targetAgent;
     if (depth > this.policy.maxDelegationDepth) {
+      this.recordBlockedAction(
+        action,
+        `Delegation depth exceeded for "${action.targetAgent}"`,
+        depth,
+      );
       const duplicate = this.recordValidationError(
         "delegate",
         `Delegation depth exceeded for "${action.targetAgent}"`,
@@ -1031,6 +1083,7 @@ export class WorkflowRuntime {
 
     const stats = this.getStats();
     if (stats.delegationCount >= this.policy.maxDelegationsPerRun) {
+      this.recordBlockedAction(action, `Delegation budget exceeded for ${action.targetAgent}`, depth);
       this.forceFinalAnalysis(`Delegation budget exceeded for ${action.targetAgent}`);
       return undefined;
     }
@@ -1143,6 +1196,7 @@ export class WorkflowRuntime {
     input: string,
     state: WorkflowExecutionState<TTriage, TResult>,
     task: string,
+    reservedBudgetStep = false,
   ): Promise<void> {
     if (!state.candidateResult || !state.finalContext) {
       throw new Error('Cannot critique before producing a candidate result via "finalize"');
@@ -1178,6 +1232,7 @@ export class WorkflowRuntime {
         inputSummary: task,
         outputSummary: (value) => `approved=${(value as WorkflowCritique).approved}`,
         actionType: "critique",
+        reservedBudgetStep,
       },
     );
 
@@ -1229,6 +1284,15 @@ export class WorkflowRuntime {
         },
       ];
       return;
+    }
+
+    if (action.type === "finalize") {
+      const finalizeGuard = definition.beforeFinalize?.(input, this, state, action);
+      if (finalizeGuard) {
+        this.recordBlockedAction(action, finalizeGuard.reason);
+        state.actionQueue = ensureActionQueueEndsWithFinalize([...finalizeGuard.recoveryActions]);
+        return;
+      }
     }
 
     if (action.type === "analyze") {
@@ -1396,6 +1460,7 @@ export class WorkflowRuntime {
       return;
     }
 
+    const isTerminalFinalize = state.actionQueue.length === 0 && !state.result;
     state.finalContext = [
       definition.buildFinalContext(input, this, state.triage),
       "",
@@ -1413,10 +1478,11 @@ export class WorkflowRuntime {
           definition.summarizeResult?.(value as TResult) ?? summarizeValue(value),
         actionType: "finalize",
         signature: `finalize:${action.task.trim().toLowerCase()}`,
+        reservedBudgetStep: isTerminalFinalize,
       },
     );
     this.saveArtifact("candidateResult", state.candidateResult);
-    await this.handleCritique(definition, input, state, action.task);
+    await this.handleCritique(definition, input, state, action.task, isTerminalFinalize);
   }
 
   async runActionQueue<TTriage, TResult>(
