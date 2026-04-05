@@ -16,6 +16,7 @@ interface GitToolExecutor {
 
 const MAX_DIFF_CHARS = 8000;
 const MAX_LOG_COMMITS = 20;
+export const DEFAULT_LOG_COMMITS = 10;
 const UNIT_SEP = "\x1f";
 
 function truncateDiff(value: string): { diff: string; truncated: boolean } {
@@ -111,7 +112,7 @@ async function defaultGitToolExecutorDiff(staged: boolean, cwd?: string): Promis
   };
 }
 
-function parseGitLog(output: string, query?: string): GitLogResult {
+function parseGitLog(output: string, query?: string, limit?: number): GitLogResult {
   const commits: GitLogEntry[] = [];
   let currentEntry: { hash: string; subject: string; author: string; date: string; files: string[] } | null = null;
 
@@ -140,7 +141,11 @@ function parseGitLog(output: string, query?: string): GitLogResult {
     commits.push(currentEntry);
   }
 
-  return { commits, query, truncated: false };
+  // Truncated when the number of commits returned equals the requested limit,
+  // indicating there may be more commits beyond what was fetched.
+  const truncated = limit !== undefined && commits.length >= limit;
+
+  return { commits, query, truncated };
 }
 
 async function defaultGitToolExecutorLog(
@@ -148,7 +153,7 @@ async function defaultGitToolExecutorLog(
   maxCommits?: number,
   cwd?: string,
 ): Promise<GitLogResult> {
-  const limit = Math.min(Math.max(1, maxCommits ?? 10), MAX_LOG_COMMITS);
+  const limit = Math.min(Math.max(1, maxCommits ?? DEFAULT_LOG_COMMITS), MAX_LOG_COMMITS);
   const format = `%H${UNIT_SEP}%s${UNIT_SEP}%an${UNIT_SEP}%ad`;
   const args = [
     "log",
@@ -169,7 +174,7 @@ async function defaultGitToolExecutorLog(
     throw new Error(`git log failed: ${result.stderr.trim() || `exit code ${result.exitCode ?? "null"}`}`);
   }
 
-  return parseGitLog(result.stdout, path);
+  return parseGitLog(result.stdout, path, limit);
 }
 
 let gitToolExecutor: GitToolExecutor = {

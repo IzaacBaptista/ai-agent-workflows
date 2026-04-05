@@ -174,9 +174,11 @@ export function summarizeGitLogResult(result: GitLogResult | undefined): string[
     return ["Git log:", "- No commits found"];
   }
 
-  const lines = [
-    `Git log (${result.commits.length} commit${result.commits.length === 1 ? "" : "s"}${result.query ? ` for path: ${result.query}` : ""}):`,
-  ];
+  const commitWord = result.commits.length === 1 ? "commit" : "commits";
+  const pathSuffix = result.query ? ` for path: ${result.query}` : "";
+  const header = `Git log (${result.commits.length} ${commitWord}${pathSuffix}):`;
+
+  const lines = [header];
 
   for (const commit of result.commits.slice(0, 5)) {
     lines.push(`- ${commit.hash.slice(0, 8)} ${truncateText(commit.subject, 80)} (${commit.author}, ${commit.date})`);

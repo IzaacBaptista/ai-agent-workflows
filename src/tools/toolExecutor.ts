@@ -11,7 +11,7 @@ import {
 } from "../core/types";
 import { ApiResponse, callExternalApi } from "./externalApiTool";
 import { CodeSearchResult, searchCode } from "./codeSearchTool";
-import { getGitDiff, getGitLog, getGitStatus } from "./gitTool";
+import { DEFAULT_LOG_COMMITS, getGitDiff, getGitLog, getGitStatus } from "./gitTool";
 import { FileReadResult, getReadFileValidationError, readFiles } from "./readFileTool";
 import { getAllowedCommandNames, isAllowedCommandName, runAllowedCommand } from "./runCommandTool";
 
@@ -35,7 +35,7 @@ const gitDiffInputSchema = z.object({
 
 const gitLogInputSchema = z.object({
   path: z.string().trim().optional(),
-  maxCommits: z.number().int().min(1).max(20).optional().default(10),
+  maxCommits: z.number().int().min(1).max(20).optional().default(DEFAULT_LOG_COMMITS),
 });
 
 const runCommandInputSchema = z.object({

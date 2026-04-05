@@ -30,8 +30,17 @@ export function loadProjectConfig(rootDir?: string): ProjectConfig {
         if (result.success) {
           return result.data;
         }
-      } catch {
-        // Ignore parse errors and continue walking up
+
+        if (process.env.LOG_LEVEL === "debug") {
+          console.error(
+            `[projectConfig] ${configPath} failed validation and was ignored: ${result.error.message}`,
+          );
+        }
+      } catch (error) {
+        if (process.env.LOG_LEVEL === "debug") {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[projectConfig] Failed to read ${configPath}: ${message}`);
+        }
       }
     }
 

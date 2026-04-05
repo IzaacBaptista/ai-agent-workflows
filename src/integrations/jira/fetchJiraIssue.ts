@@ -101,7 +101,8 @@ export async function fetchJiraIssue(
     );
   }
 
-  const url = `${options.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${encodeURIComponent(issueKey)}`;
+  const normalizedBaseUrl = options.baseUrl.replace(/\/$/, "");
+  const url = `${normalizedBaseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}`;
 
   const token = Buffer.from(`${options.email}:${options.apiToken}`).toString("base64");
 
@@ -135,6 +136,6 @@ export async function fetchJiraIssue(
         : undefined,
     labels: extractStringArray(fields.labels),
     components: extractStringArray(fields.components),
-    url: `${options.baseUrl.replace(/\/$/, "")}/browse/${issueKey}`,
+    url: `${normalizedBaseUrl}/browse/${issueKey}`,
   };
 }
