@@ -34,7 +34,7 @@ function getToolCallRecords(runRecord: WorkflowRunRecord | null): WorkflowToolCa
     return [];
   }
 
-  const records = runRecord.artifacts.toolCalls;
+  const records = runRecord.artifacts?.toolCalls;
   return Array.isArray(records) ? (records as WorkflowToolCallRecord[]) : [];
 }
 
@@ -179,7 +179,7 @@ export function extractResultSummary<T>(
     }
   }
 
-  const artifactSummary = getObjectSummary(runRecord?.artifacts.result);
+  const artifactSummary = getObjectSummary(runRecord?.artifacts?.result);
   if (artifactSummary) {
     return truncateText(artifactSummary, 200);
   }
@@ -336,7 +336,7 @@ export function humanizeFailureSummary<T>(
 
 export function getBehaviorSignal(meta: WorkflowExecutionMeta, runRecord: WorkflowRunRecord | null): string | undefined {
   const failure = (runRecord?.error ?? "").toLowerCase();
-  const forcedReason = String(runRecord?.artifacts.forcedFinalAnalysisReason ?? "").toLowerCase();
+  const forcedReason = String(runRecord?.artifacts?.forcedFinalAnalysisReason ?? "").toLowerCase();
   const hasDelegateStep = (runRecord?.steps ?? []).some(
     (step) => step.actionType === "delegate" && !step.suppressed,
   );

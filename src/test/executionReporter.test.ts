@@ -9,7 +9,7 @@ import {
 import { ExecutionReporter } from "../reporting/ExecutionReporter";
 import { RunSummaryFormatter } from "../reporting/RunSummaryFormatter";
 import { RunTimelineFormatter } from "../reporting/RunTimelineFormatter";
-import { buildHighLevelFlow } from "../reporting/reportingUtils";
+import { buildHighLevelFlow, getBehaviorSignal } from "../reporting/reportingUtils";
 import { parseCliArgs } from "../cli/parseCliArgs";
 
 const defaultPolicy: WorkflowExecutionPolicy = {
@@ -480,4 +480,28 @@ test("parseCliArgs reads output mode and falls back to raw when invalid", () => 
   assert.equal(summaryArgs.outputMode, "timeline");
   assert.equal(summaryArgs.input, "WorkflowRuntime timeouts are not cleared");
   assert.equal(invalidArgs.outputMode, "raw");
+});
+
+test("getBehaviorSignal does not throw when runRecord.artifacts is missing", () => {
+  const meta = createMeta({ status: "failed", stepCount: 0 });
+  const runRecordWithoutArtifacts = {
+    ...createRunRecord({ status: "failed", error: "Cannot read properties of undefined" }),
+    artifacts: undefined as unknown as Record<string, unknown>,
+  };
+
+  assert.doesNotThrow(() => getBehaviorSignal(meta, runRecordWithoutArtifacts));
+});
+
+test("RunSummaryFormatter does not throw when runRecord.artifacts is missing", () => {
+  const runRecordWithoutArtifacts = {
+    ...createRunRecord({ status: "failed", error: "Cannot read properties of undefined" }),
+    artifacts: undefined as unknown as Record<string, unknown>,
+  };
+  const result: WorkflowResult<unknown> = {
+    success: false,
+    error: "Cannot read properties of undefined",
+    meta: createMeta({ status: "failed", stepCount: 0 }),
+  };
+
+  assert.doesNotThrow(() => RunSummaryFormatter.format({ result, runRecord: runRecordWithoutArtifacts }));
 });

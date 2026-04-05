@@ -93,6 +93,9 @@ function loadPersistedRuns(): void {
     try {
       const content = readFileSync(fullPath, "utf-8");
       const run = JSON.parse(content) as WorkflowRunRecord;
+      if (!run.artifacts || typeof run.artifacts !== "object" || Array.isArray(run.artifacts)) {
+        run.artifacts = {};
+      }
       runStore.set(run.runId, run);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

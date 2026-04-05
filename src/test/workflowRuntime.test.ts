@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import * as llmClient from "../core/llmClient";
 import {
   RuntimeAction,
@@ -19,6 +21,7 @@ import {
 import { setGitToolExecutorForTesting } from "../tools/gitTool";
 import { setIsolatedWorkspaceFactoryForTesting } from "../tools/isolatedWorkspaceTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
+import { getAllRunMemories, resetRunMemories } from "../memory/simpleMemory";
 
 interface TestTriage {
   summary: string;
@@ -1183,4 +1186,55 @@ test("WorkflowRuntime stops new delegations when the delegation budget is exhaus
     /Delegation budget exceeded/,
   );
   assert.equal(state.actionQueue[0].type, "finalize");
+});
+
+test("loadPersistedRuns sanitizes run files with missing artifacts", () => {
+  const runStorageDir = path.resolve(process.cwd(), ".runs");
+  const legacyRunId = "LegacyWorkflow:1700000000000:sanitize1";
+  const legacyRunFile = path.join(runStorageDir, `${legacyRunId}.json`);
+
+  const legacyRun = {
+    runId: legacyRunId,
+    workflowName: "LegacyWorkflow",
+    status: "completed",
+    input: "legacy input without artifacts field",
+    startedAt: "2024-01-01T00:00:00.000Z",
+    completedAt: "2024-01-01T00:01:00.000Z",
+    policy: {
+      maxSteps: 10,
+      maxRetriesPerStep: 1,
+      timeoutMs: 60000,
+      maxConsecutiveNoProgress: 1,
+      maxToolCalls: 4,
+      maxRepeatedIdenticalToolCalls: 1,
+      maxEditActionsPerRun: 2,
+      maxFilesPerEditAction: 3,
+      maxDelegationsPerRun: 2,
+      maxDelegationDepth: 1,
+      maxCriticRedirects: 2,
+    },
+    steps: [],
+  };
+
+  fs.mkdirSync(runStorageDir, { recursive: true });
+  fs.writeFileSync(legacyRunFile, JSON.stringify(legacyRun, null, 2), "utf-8");
+
+  try {
+    resetRunMemories({ clearPersistedRuns: false });
+
+    const runs = getAllRunMemories();
+    const loaded = runs.find((run) => run.runId === legacyRunId);
+
+    assert.ok(loaded, "legacy run should be loaded from disk");
+    assert.ok(
+      loaded.artifacts !== undefined && typeof loaded.artifacts === "object",
+      "artifacts should be sanitized to an empty object when missing from disk",
+    );
+    assert.doesNotThrow(() => {
+      const _ = loaded.artifacts["forcedFinalAnalysisReason"];
+    }, "accessing artifacts properties should not throw after sanitization");
+  } finally {
+    fs.rmSync(legacyRunFile, { force: true });
+    resetRunMemories({ clearPersistedRuns: false });
+  }
 });
