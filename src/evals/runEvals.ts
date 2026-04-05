@@ -9,6 +9,7 @@ import {
   setEditableFileContextLoaderForTesting,
 } from "../tools/editPatchTool";
 import { setGitToolExecutorForTesting } from "../tools/gitTool";
+import { setIsolatedWorkspaceFactoryForTesting } from "../tools/isolatedWorkspaceTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 import { runBugWorkflow } from "../workflows/bugWorkflow";
 import { runIssueWorkflow } from "../workflows/issueWorkflow";
@@ -189,6 +190,7 @@ async function executeScenario(scenario: EvalScenario): Promise<ScenarioExecutio
     setCodePatchApplierForTesting();
     setRunCommandExecutorForTesting();
     setGitToolExecutorForTesting();
+    setIsolatedWorkspaceFactoryForTesting();
   }
 }
 

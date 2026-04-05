@@ -87,7 +87,11 @@ EXTERNAL_API_TIMEOUT_MS=5000
 - `edit_patch` is used only for localized repository changes with explicit target files.
 - `CoderAgent` produces structured patch plans with full replacement file contents for the selected files.
 - Patch application is scope-limited to approved project paths such as `src/`, `prompts/`, `docs/`, `evals/`, `scripts/`, and a few root config/docs files.
+- Patch execution now runs inside a temporary isolated Git worktree instead of mutating the main workspace directly.
+- When a patch requests validation, the runtime captures validation both before and after the patch inside that isolated worktree.
+- Patch artifacts include `validationOutcome`, isolated `git_status` / `git_diff`, unexpected changed files, and whether the temporary worktree cleaned up successfully.
 - After a patch is applied, the runtime can automatically run the narrowest validation command suggested by the patch (`lint`, `build`, or `test`).
+- Critique and replanning can reject a patch when validation regresses, the diff spreads outside the requested files, or cleanup fails.
 - Patch results are stored in run artifacts and fed back into working memory, replanning, critique, and final analysis.
 
 ### Git context tools
@@ -186,6 +190,8 @@ All three workflows follow the same execution pattern:
    allows the runtime to inspect `git_status` and `git_diff` so PR review can use the real local change set and modified hunks as evidence.
 12. Controlled autonomous patching
    allows the model to request `edit_patch`, apply a localized code change through `CoderAgent`, validate it automatically, and carry the resulting patch evidence forward into replanning and critique.
+13. Isolated and reversible patch validation
+   evaluates `edit_patch` inside a temporary Git worktree, compares validation before/after, records the isolated diff, and gives the critic enough evidence to reject regressive or overly broad patches.
 
 ## Project structure
 
@@ -497,6 +503,7 @@ The eval harness uses isolated `.eval-runs` storage and checks scenario-level be
 
 - preferring `run_command(test)` in bug investigation
 - applying a localized `edit_patch` and validating it automatically in a bug workflow
+- rejecting a regressive isolated patch based on before/after validation and unexpected diff spread
 - choosing between `lint`, `build`, and `test` based on workflow context
 - using `git_status` and `git_diff` in PR review
 - using staged Git diff context when that is the relevant review surface

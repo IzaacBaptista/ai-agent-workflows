@@ -11,6 +11,8 @@ import {
   applyCodePatchPlan,
   loadEditableFileContexts,
 } from "../tools/editPatchTool";
+import { getGitDiffAt, getGitStatusAt } from "../tools/gitTool";
+import { createIsolatedWorkspace, IsolatedWorkspace } from "../tools/isolatedWorkspaceTool";
 import {
   appendRunStep,
   completeRun,
@@ -21,6 +23,7 @@ import {
   updateRunStep,
 } from "../memory/simpleMemory";
 import { logWorkflowStep } from "../tools/loggingTool";
+import { runAllowedCommand } from "../tools/runCommandTool";
 import {
   buildWorkflowToolSignature,
   executeWorkflowTool,
@@ -30,13 +33,16 @@ import {
 } from "../tools/toolExecutor";
 import {
   AppliedCodePatchResult,
+  CommandExecutionResult,
   CodePatchPlan,
   EditableFileContext,
+  PatchValidationOutcome,
   RegisteredAgentName,
   RelevantMemoryContext,
   ReviewerAssessment,
   RuntimeAction,
   RuntimeActionType,
+  WorkflowCommandName,
   WorkflowCritique,
   WorkflowDelegationRecord,
   WorkflowExecutionMeta,
@@ -187,6 +193,75 @@ function getToolProgress(toolResult: WorkflowToolResult): boolean {
   }
 
   return true;
+}
+
+function buildRunCommandSummary(result: CommandExecutionResult): string {
+  return `command=${result.command},exitCode=${result.exitCode ?? "null"},timedOut=${result.timedOut}`;
+}
+
+function getValidationSeverity(result: CommandExecutionResult): number {
+  if (result.timedOut) {
+    return 2;
+  }
+
+  return result.exitCode === 0 ? 0 : 1;
+}
+
+function estimateFailureCount(result: CommandExecutionResult): number | undefined {
+  const combinedOutput = `${result.stdout}\n${result.stderr}`;
+  const patterns = [
+    /(\d+)\s+(?:failing|failed)\b/gi,
+    /(\d+)\s+errors?\b/gi,
+    /(\d+)\s+tests?\s+failed\b/gi,
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(combinedOutput);
+    if (match?.[1]) {
+      return Number.parseInt(match[1], 10);
+    }
+  }
+
+  return undefined;
+}
+
+function compareValidationResults(
+  before: CommandExecutionResult | undefined,
+  after: CommandExecutionResult | undefined,
+): PatchValidationOutcome {
+  if (!before || !after) {
+    return "not_run";
+  }
+
+  const beforeSeverity = getValidationSeverity(before);
+  const afterSeverity = getValidationSeverity(after);
+
+  if (afterSeverity > beforeSeverity) {
+    return "regressed";
+  }
+
+  if (afterSeverity < beforeSeverity) {
+    return "improved";
+  }
+
+  const beforeFailures = estimateFailureCount(before);
+  const afterFailures = estimateFailureCount(after);
+  if (beforeFailures != null && afterFailures != null) {
+    if (afterFailures > beforeFailures) {
+      return "regressed";
+    }
+
+    if (afterFailures < beforeFailures) {
+      return "improved";
+    }
+  }
+
+  return "unchanged";
+}
+
+function getUnexpectedChangedFiles(changedFiles: string[], requestedFiles: string[]): string[] {
+  const requested = new Set(requestedFiles.map((file) => file.trim()));
+  return changedFiles.filter((file) => !requested.has(file.trim()));
 }
 
 export class WorkflowRuntime {
@@ -667,6 +742,54 @@ export class WorkflowRuntime {
     ].join("\n");
   }
 
+  private async executePatchValidationCommand(
+    command: WorkflowCommandName,
+    reason: string,
+    cwd: string,
+    signatureSuffix: string,
+  ): Promise<CommandExecutionResult> {
+    const signature = buildWorkflowToolSignature("run_command", { command });
+    const result = await this.executeStep(
+      "tool_call",
+      async () => runAllowedCommand(command, { cwd }),
+      {
+        inputSummary: reason,
+        outputSummary: (value) => buildRunCommandSummary(value as CommandExecutionResult),
+        actionType: "tool_call",
+        toolName: "run_command",
+        signature: `${signature}:${signatureSuffix}`,
+      },
+    );
+
+    const workingMemory = this.getWorkingMemory();
+    const workingMemorySignature = getWorkingMemorySignature(workingMemory);
+    const decisionSignature = getCommandDecisionSignature(workingMemory);
+
+    this.updateStats((current) => ({
+      ...current,
+      toolCallCount: current.toolCallCount + 1,
+    }));
+    this.appendArtifactArray("commandResults", result);
+    this.appendArtifactArray("toolCalls", {
+      toolName: "run_command",
+      signature,
+      request: { command },
+      result: {
+        tool: "run_command",
+        summary: buildRunCommandSummary(result),
+        data: result,
+        signature,
+      },
+      suppressed: false,
+      cached: false,
+      workingMemorySignature,
+      decisionSignature,
+      createdAt: new Date().toISOString(),
+    } satisfies WorkflowToolCallRecord);
+
+    return result;
+  }
+
   private async executeEditPatchAction(
     action: RuntimeAction,
     input: string,
@@ -696,66 +819,182 @@ export class WorkflowRuntime {
     const workingMemory = this.getWorkingMemory();
     const workingMemorySignature = getWorkingMemorySignature(workingMemory);
     const signature = this.buildEditPatchSignature(action, workingMemorySignature);
-    const editableFiles = loadEditableFileContexts(action.files);
     const memoryContext = this.buildMemoryContext(
       `${input}\n${action.task}\n${action.files.join("\n")}`,
       "edit_patch",
     );
+    let isolatedWorkspace: IsolatedWorkspace;
+    let patchPlan: CodePatchPlan | undefined;
 
-    const patchPlan = await this.executeStep(
-      "edit_patch",
-      async () => {
-        const coder = new CoderAgent();
-
-        try {
-          return await coder.run(
-            this.buildCoderPrompt(input, action, workingMemory, memoryContext, editableFiles),
-          );
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          this.recordValidationError("edit_patch", message, signature);
-          throw error;
-        }
-      },
-      {
-        agentName: "CoderAgent",
-        inputSummary: action.task,
-        outputSummary: (value) =>
-          `edits=${(value as CodePatchPlan).edits.length},validation=${(value as CodePatchPlan).validationCommand ?? "none"}`,
-        actionType: "edit_patch",
-        signature,
-      },
-    );
-
-    let appliedPatch: AppliedCodePatchResult;
     try {
-      appliedPatch = applyCodePatchPlan(patchPlan, action.files);
+      isolatedWorkspace = await createIsolatedWorkspace();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const duplicate = this.recordValidationError("edit_patch", message, signature);
+      const duplicate = this.recordValidationError("edit_patch", message, `${signature}:worktree`);
       if (duplicate) {
         throw error instanceof Error ? error : new Error(message);
       }
       return undefined;
     }
+
+    let appliedPatch: AppliedCodePatchResult | undefined;
+    let cleanupError: string | undefined;
+
+    try {
+      const editableFiles = loadEditableFileContexts(action.files, isolatedWorkspace.path);
+
+      patchPlan = await this.executeStep(
+        "edit_patch",
+        async () => {
+          const coder = new CoderAgent();
+
+          try {
+            return await coder.run(
+              this.buildCoderPrompt(input, action, workingMemory, memoryContext, editableFiles),
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.recordValidationError("edit_patch", message, signature);
+            throw error;
+          }
+        },
+        {
+          agentName: "CoderAgent",
+          inputSummary: action.task,
+          outputSummary: (value) =>
+            `edits=${(value as CodePatchPlan).edits.length},validation=${(value as CodePatchPlan).validationCommand ?? "none"}`,
+          actionType: "edit_patch",
+          signature,
+        },
+      );
+      const resolvedPatchPlan = patchPlan;
+
+      let validationBefore: CommandExecutionResult | undefined;
+      if (resolvedPatchPlan.validationCommand) {
+        try {
+          validationBefore = await runAllowedCommand(resolvedPatchPlan.validationCommand, {
+            cwd: isolatedWorkspace.path,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const duplicate = this.recordValidationError(
+            "edit_patch",
+            `Pre-patch validation failed: ${message}`,
+            `${signature}:validation-before`,
+          );
+          if (duplicate) {
+            throw error instanceof Error ? error : new Error(message);
+          }
+          return undefined;
+        }
+      }
+
+      let basePatchResult: AppliedCodePatchResult;
+      try {
+        basePatchResult = applyCodePatchPlan(resolvedPatchPlan, action.files, isolatedWorkspace.path);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const duplicate = this.recordValidationError("edit_patch", message, signature);
+        if (duplicate) {
+          throw error instanceof Error ? error : new Error(message);
+        }
+        return undefined;
+      }
+
+      let validationAfter: CommandExecutionResult | undefined;
+      if (basePatchResult.validationCommand) {
+        try {
+          validationAfter = await this.executePatchValidationCommand(
+            basePatchResult.validationCommand,
+            `Validate isolated patch for "${action.task}"`,
+            isolatedWorkspace.path,
+            `patch:${signature}`,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const duplicate = this.recordValidationError(
+            "edit_patch",
+            `Post-patch validation failed: ${message}`,
+            `${signature}:validation-after`,
+          );
+          if (duplicate) {
+            throw error instanceof Error ? error : new Error(message);
+          }
+          return undefined;
+        }
+      }
+
+      let gitStatus;
+      let gitDiff;
+      try {
+        gitStatus = await getGitStatusAt(isolatedWorkspace.path);
+        gitDiff = await getGitDiffAt(isolatedWorkspace.path, false);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const duplicate = this.recordValidationError(
+          "edit_patch",
+          `Patch diff collection failed: ${message}`,
+          `${signature}:git`,
+        );
+        if (duplicate) {
+          throw error instanceof Error ? error : new Error(message);
+        }
+        return undefined;
+      }
+
+      const changedFiles = Array.from(
+        new Set([
+          ...gitDiff.changedFiles,
+          ...gitStatus.entries.map((entry) => entry.path),
+        ]),
+      );
+
+      appliedPatch = {
+        ...basePatchResult,
+        validationBefore,
+        validationAfter,
+        validationOutcome: compareValidationResults(validationBefore, validationAfter),
+        gitStatus,
+        gitDiff,
+        unexpectedChangedFiles: getUnexpectedChangedFiles(changedFiles, action.files),
+        isolationMode: "isolated_worktree",
+        worktreeCleanedUp: true,
+      };
+    } finally {
+      try {
+        await isolatedWorkspace.cleanup();
+      } catch (error) {
+        cleanupError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    if (!appliedPatch) {
+      if (cleanupError) {
+        this.recordValidationError("edit_patch", cleanupError, `${signature}:cleanup`);
+      }
+      return undefined;
+    }
+
+    if (cleanupError) {
+      appliedPatch.worktreeCleanedUp = false;
+      this.recordValidationError("edit_patch", cleanupError, `${signature}:cleanup`);
+    }
+
     this.updateStats((current) => ({
       ...current,
       editActionCount: current.editActionCount + 1,
     }));
     this.appendArtifactArray("patchResults", appliedPatch);
-    this.saveArtifact("latestPatchPlan", patchPlan);
-    this.recordProgress("edit_patch", signature, appliedPatch.edits.length > 0);
-
-    if (appliedPatch.validationCommand) {
-      await this.executeToolAction({
-        type: "tool_call",
-        toolName: "run_command",
-        input: {
-          command: appliedPatch.validationCommand,
-        },
-        reason: `Validate applied patch for "${action.task}"`,
-      });
+    if (patchPlan) {
+      this.saveArtifact("latestPatchPlan", patchPlan);
     }
+    this.recordProgress(
+      "edit_patch",
+      signature,
+      appliedPatch.edits.length > 0 &&
+        appliedPatch.validationOutcome !== "regressed" &&
+        appliedPatch.unexpectedChangedFiles.length === 0,
+    );
 
     return appliedPatch;
   }
@@ -1103,7 +1342,12 @@ export class WorkflowRuntime {
         return;
       }
 
-      if (this.shouldForceFinalAnalysis()) {
+      const patchHasRegressionSignals =
+        patchResult.validationOutcome === "regressed" ||
+        patchResult.unexpectedChangedFiles.length > 0 ||
+        patchResult.worktreeCleanedUp === false;
+
+      if (!patchHasRegressionSignals && this.shouldForceFinalAnalysis()) {
         this.forceFinalAnalysis(`No progress after edit_patch "${action.task}"`);
         state.actionQueue = [
           {

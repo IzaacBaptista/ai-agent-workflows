@@ -16,6 +16,8 @@ import {
   setCodePatchApplierForTesting,
   setEditableFileContextLoaderForTesting,
 } from "../tools/editPatchTool";
+import { setGitToolExecutorForTesting } from "../tools/gitTool";
+import { setIsolatedWorkspaceFactoryForTesting } from "../tools/isolatedWorkspaceTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 
 interface TestTriage {
@@ -280,21 +282,28 @@ test("WorkflowRuntime applies edit_patch and validates it with run_command", asy
 
   setEditableFileContextLoaderForTesting(() => [
     {
-      path: "/repo/src/core/workflowRuntime.ts",
+      path: "src/core/workflowRuntime.ts",
       exists: true,
       content: "export const fixed = false;\n",
     },
   ]);
+  setIsolatedWorkspaceFactoryForTesting(async () => ({
+    path: "/isolated-worktree",
+    cleanup: async () => undefined,
+  }));
   setCodePatchApplierForTesting((plan) => ({
     summary: plan.summary,
     edits: [
       {
-        path: "/repo/src/core/workflowRuntime.ts",
+        path: "src/core/workflowRuntime.ts",
         changeType: "update",
         bytesWritten: 26,
       },
     ],
     validationCommand: plan.validationCommand,
+    validationOutcome: "not_run",
+    unexpectedChangedFiles: [],
+    isolationMode: "direct",
   }));
   setRunCommandExecutorForTesting(async (command) => ({
     command,
@@ -305,6 +314,28 @@ test("WorkflowRuntime applies edit_patch and validates it with run_command", asy
     durationMs: 14,
     signal: null,
   }));
+  setGitToolExecutorForTesting({
+    async getStatus() {
+      return {
+        entries: [
+          {
+            indexStatus: " ",
+            workingTreeStatus: "M",
+            path: "src/core/workflowRuntime.ts",
+          },
+        ],
+        raw: " M src/core/workflowRuntime.ts",
+      };
+    },
+    async getDiff(staged) {
+      return {
+        staged,
+        diff: "diff --git a/src/core/workflowRuntime.ts b/src/core/workflowRuntime.ts",
+        changedFiles: ["src/core/workflowRuntime.ts"],
+        truncated: false,
+      };
+    },
+  });
 
   (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
     const next = responses.shift();
@@ -358,10 +389,28 @@ test("WorkflowRuntime applies edit_patch and validates it with run_command", asy
     assert.equal(Array.isArray(runRecord.artifacts.commandResults), true);
     assert.equal((runRecord.artifacts.commandResults as unknown[]).length, 1);
     assert.ok(runRecord.steps.some((step) => step.actionType === "edit_patch"));
+    const patchResult = (runRecord.artifacts.patchResults as Array<{
+      isolationMode: string;
+      worktreeCleanedUp?: boolean;
+      validationOutcome: string;
+      gitDiff?: { changedFiles: string[] };
+      validationBefore?: { command: string };
+      validationAfter?: { command: string };
+      unexpectedChangedFiles: string[];
+    }>)[0];
+    assert.equal(patchResult.isolationMode, "isolated_worktree");
+    assert.equal(patchResult.worktreeCleanedUp, true);
+    assert.equal(patchResult.validationOutcome, "unchanged");
+    assert.deepEqual(patchResult.gitDiff?.changedFiles, ["src/core/workflowRuntime.ts"]);
+    assert.equal(patchResult.validationBefore?.command, "test");
+    assert.equal(patchResult.validationAfter?.command, "test");
+    assert.deepEqual(patchResult.unexpectedChangedFiles, []);
   } finally {
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
     setEditableFileContextLoaderForTesting();
     setCodePatchApplierForTesting();
+    setIsolatedWorkspaceFactoryForTesting();
+    setGitToolExecutorForTesting();
     setRunCommandExecutorForTesting();
   }
 });

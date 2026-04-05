@@ -8,6 +8,7 @@ import {
   setEditableFileContextLoaderForTesting,
 } from "../tools/editPatchTool";
 import { setGitToolExecutorForTesting } from "../tools/gitTool";
+import { setIsolatedWorkspaceFactoryForTesting } from "../tools/isolatedWorkspaceTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 import { runBugWorkflow } from "../workflows/bugWorkflow";
 import { runIssueWorkflow } from "../workflows/issueWorkflow";
@@ -328,21 +329,28 @@ test("runBugWorkflow can apply edit_patch and validate it automatically", async 
 
   setEditableFileContextLoaderForTesting(() => [
     {
-      path: "/repo/src/core/workflowRuntime.ts",
+      path: "src/core/workflowRuntime.ts",
       exists: true,
       content: "export const workflowRuntimePatched = false;\n",
     },
   ]);
+  setIsolatedWorkspaceFactoryForTesting(async () => ({
+    path: "/isolated-worktree",
+    cleanup: async () => undefined,
+  }));
   setCodePatchApplierForTesting((plan) => ({
     summary: plan.summary,
     edits: [
       {
-        path: "/repo/src/core/workflowRuntime.ts",
+        path: "src/core/workflowRuntime.ts",
         changeType: "update",
         bytesWritten: 44,
       },
     ],
     validationCommand: plan.validationCommand,
+    validationOutcome: "not_run",
+    unexpectedChangedFiles: [],
+    isolationMode: "direct",
   }));
   setRunCommandExecutorForTesting(async (command) => ({
     command,
@@ -353,6 +361,28 @@ test("runBugWorkflow can apply edit_patch and validate it automatically", async 
     durationMs: 21,
     signal: null,
   }));
+  setGitToolExecutorForTesting({
+    async getStatus() {
+      return {
+        entries: [
+          {
+            indexStatus: " ",
+            workingTreeStatus: "M",
+            path: "src/core/workflowRuntime.ts",
+          },
+        ],
+        raw: " M src/core/workflowRuntime.ts",
+      };
+    },
+    async getDiff(staged) {
+      return {
+        staged,
+        changedFiles: ["src/core/workflowRuntime.ts"],
+        diff: "diff --git a/src/core/workflowRuntime.ts b/src/core/workflowRuntime.ts",
+        truncated: false,
+      };
+    },
+  });
 
   (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
     const next = responses.shift();
@@ -380,11 +410,206 @@ test("runBugWorkflow can apply edit_patch and validate it automatically", async 
     assert.equal(Array.isArray(run.artifacts.commandResults), true);
     assert.equal((run.artifacts.commandResults as unknown[]).length, 1);
     assert.match(String(run.artifacts.context ?? ""), /Applied patches:/);
+    assert.match(String(run.artifacts.context ?? ""), /outcome=unchanged/);
   } finally {
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
     setEditableFileContextLoaderForTesting();
     setCodePatchApplierForTesting();
+    setIsolatedWorkspaceFactoryForTesting();
+    setGitToolExecutorForTesting();
     setRunCommandExecutorForTesting();
+  }
+});
+
+test("runBugWorkflow surfaces regressive isolated patch evidence to the critic and follows the redirect", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  const prompts: string[] = [];
+  const responses = [
+    buildLlmResponse({
+      summary: "Patch the bug first",
+      actions: [
+        {
+          type: "edit_patch",
+          task: "Apply a localized fix to WorkflowRuntime timeout cleanup",
+          files: ["src/core/workflowRuntime.ts"],
+          reason: "The bug looks localized enough for a small fix attempt",
+        },
+        {
+          type: "finalize",
+          task: "Summarize the bug analysis",
+          reason: "Finalize after the patch attempt",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Apply the timeout cleanup patch",
+      edits: [
+        {
+          path: "src/core/workflowRuntime.ts",
+          changeType: "update",
+          content: "export const workflowRuntimePatched = true;\n",
+          reason: "Apply the localized fix under test",
+        },
+      ],
+      validationCommand: "test",
+    }),
+    buildLlmResponse({
+      summary: "Finalize after the patch attempt",
+      actions: [
+        {
+          type: "finalize",
+          task: "Summarize the bug analysis",
+          reason: "The patch attempt is complete",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Initial patched bug result",
+      possibleCauses: ["timeout cleanup looked incomplete"],
+      investigationSteps: ["inspect the isolated patch attempt"],
+      fixSuggestions: ["accept the patch if it is safe"],
+      risks: ["patch safety is still uncertain"],
+    }),
+    buildLlmResponse({
+      approved: false,
+      summary: "Reject the regressive patch attempt",
+      missingEvidence: ["The isolated patch regressed validation and touched unexpected files"],
+      confidence: "high",
+      nextAction: {
+        type: "finalize",
+        task: "Explain why the isolated patch must be rejected",
+        reason: "The current evidence shows the patch regressed validation",
+      },
+    }),
+    buildLlmResponse({
+      summary: "Reject regressive patch",
+      possibleCauses: ["the isolated patch worsened the test outcome"],
+      investigationSteps: ["compare pre-patch and post-patch validation results"],
+      fixSuggestions: ["narrow the patch and retry in isolation"],
+      risks: ["unexpected file changes broaden the patch scope"],
+    }),
+    buildLlmResponse({
+      approved: true,
+      summary: "The redirected conclusion is now appropriately cautious",
+      missingEvidence: [],
+      confidence: "high",
+    }),
+  ];
+
+  let commandInvocationCount = 0;
+  setEditableFileContextLoaderForTesting(() => [
+    {
+      path: "src/core/workflowRuntime.ts",
+      exists: true,
+      content: "export const workflowRuntimePatched = false;\n",
+    },
+  ]);
+  setIsolatedWorkspaceFactoryForTesting(async () => ({
+    path: "/isolated-worktree",
+    cleanup: async () => undefined,
+  }));
+  setCodePatchApplierForTesting((plan) => ({
+    summary: plan.summary,
+    edits: [
+      {
+        path: "src/core/workflowRuntime.ts",
+        changeType: "update",
+        bytesWritten: 44,
+      },
+    ],
+    validationCommand: plan.validationCommand,
+    validationOutcome: "not_run",
+    unexpectedChangedFiles: [],
+    isolationMode: "direct",
+  }));
+  setRunCommandExecutorForTesting(async (command) => {
+    commandInvocationCount += 1;
+    if (commandInvocationCount === 1) {
+      return {
+        command,
+        exitCode: 0,
+        stdout: "10 passing",
+        stderr: "",
+        timedOut: false,
+        durationMs: 20,
+        signal: null,
+      };
+    }
+
+    return {
+      command,
+      exitCode: 1,
+      stdout: "2 failing",
+      stderr: "timeout cleanup regression",
+      timedOut: false,
+      durationMs: 23,
+      signal: null,
+    };
+  });
+  setGitToolExecutorForTesting({
+    async getStatus() {
+      return {
+        entries: [
+          {
+            indexStatus: " ",
+            workingTreeStatus: "M",
+            path: "src/core/workflowRuntime.ts",
+          },
+          {
+            indexStatus: " ",
+            workingTreeStatus: "M",
+            path: "src/core/types.ts",
+          },
+        ],
+        raw: " M src/core/workflowRuntime.ts\n M src/core/types.ts",
+      };
+    },
+    async getDiff(staged) {
+      return {
+        staged,
+        changedFiles: ["src/core/workflowRuntime.ts", "src/core/types.ts"],
+        diff: "diff --git a/src/core/workflowRuntime.ts b/src/core/workflowRuntime.ts\n+++ b/src/core/types.ts",
+        truncated: false,
+      };
+    },
+  });
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async (prompt) => {
+    prompts.push(prompt);
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const result = await runBugWorkflow("Attempt to fix WorkflowRuntime timeout cleanup automatically");
+
+    assert.equal(result.success, true);
+    if (!result.success) {
+      return;
+    }
+
+    assert.equal(result.meta.criticRedirectCount, 1);
+    assert.equal(result.data.summary, "Reject regressive patch");
+    const run = getRunMemory(result.meta.runId);
+    const patchResult = (run.artifacts.patchResults as Array<{
+      validationOutcome: string;
+      unexpectedChangedFiles: string[];
+    }>)[0];
+    assert.equal(patchResult.validationOutcome, "regressed");
+    assert.deepEqual(patchResult.unexpectedChangedFiles, ["src/core/types.ts"]);
+    assert.ok(prompts.some((prompt) => prompt.includes("patch_test_regressed")));
+    assert.ok(prompts.some((prompt) => prompt.includes("unexpectedChangedFiles=1")));
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+    setEditableFileContextLoaderForTesting();
+    setCodePatchApplierForTesting();
+    setIsolatedWorkspaceFactoryForTesting();
+    setRunCommandExecutorForTesting();
+    setGitToolExecutorForTesting();
   }
 });
 

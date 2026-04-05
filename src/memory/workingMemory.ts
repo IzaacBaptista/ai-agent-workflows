@@ -31,6 +31,30 @@ function buildCommandSignals(commandResults: CommandExecutionResult[]): string[]
   );
 }
 
+function buildPatchSignals(patchResults: AppliedCodePatchResult[]): string[] {
+  return uniqueStrings(
+    patchResults.flatMap((result) => {
+      const validationOutcome = result.validationOutcome ?? "not_run";
+      const unexpectedChangedFiles = result.unexpectedChangedFiles ?? [];
+      const signals = [`patch_${validationOutcome}`];
+
+      if (result.validationCommand) {
+        signals.push(`patch_${result.validationCommand}_${validationOutcome}`);
+      }
+
+      if (unexpectedChangedFiles.length > 0) {
+        signals.push("patch_unexpected_changes");
+      }
+
+      if (result.worktreeCleanedUp === false) {
+        signals.push("patch_cleanup_failed");
+      }
+
+      return signals;
+    }),
+  );
+}
+
 function buildEvidence(run: WorkflowRunRecord): string[] {
   const evidence: string[] = [];
 
@@ -83,6 +107,7 @@ export function buildWorkingMemory(run: WorkflowRunRecord): WorkingMemorySnapsho
     lastCritique: safeArray<WorkflowCritique>(run.artifacts.critiques).slice(-1)[0],
     toolCalls: safeArray<WorkflowToolCallRecord>(run.artifacts.toolCalls),
     patchResults,
+    patchSignals: buildPatchSignals(patchResults),
     delegations: safeArray<WorkflowDelegationRecord>(run.artifacts.delegations),
     commandResults,
     commandSignals: buildCommandSignals(commandResults),
@@ -104,11 +129,16 @@ export function summarizeWorkingMemory(memory: WorkingMemorySnapshot): string {
     `Has triage: ${memory.triage ? "yes" : "no"}`,
     `Tool calls: ${memory.toolCalls.length}`,
     `Patch results: ${memory.patchResults.length}`,
+    `Patch signals: ${memory.patchSignals.join(", ") || "none"}`,
     `Delegations: ${memory.delegations.length}`,
     `Command results: ${memory.commandResults.length}`,
     `Command signals: ${memory.commandSignals.join(", ") || "none"}`,
     `Latest command: ${latestCommand ? `${latestCommand.command}:${getCommandStatus(latestCommand)}:${latestCommand.exitCode ?? "null"}` : "none"}`,
-    `Latest patch: ${latestPatch ? `${latestPatch.edits.length} edits${latestPatch.validationCommand ? ` validated with ${latestPatch.validationCommand}` : ""}` : "none"}`,
+    `Latest patch: ${
+      latestPatch
+        ? `${latestPatch.edits.length} edits${latestPatch.validationCommand ? ` validated with ${latestPatch.validationCommand}` : ""}, outcome=${latestPatch.validationOutcome ?? "not_run"}, unexpectedChangedFiles=${latestPatch.unexpectedChangedFiles?.length ?? 0}, cleanup=${latestPatch.worktreeCleanedUp === false ? "failed" : "ok"}`
+        : "none"
+    }`,
     `Last critique: ${memory.lastCritique?.summary ?? "none"}`,
     `Forced finalization reason: ${memory.forcedFinalizationReason ?? "none"}`,
     `Validation errors: ${memory.validationErrors.length}`,
@@ -130,7 +160,11 @@ export function getWorkingMemorySignature(memory: WorkingMemorySnapshot): string
     patchResults: memory.patchResults.map((result) => ({
       edits: result.edits.map((edit) => `${edit.changeType}:${edit.path}`),
       validationCommand: result.validationCommand ?? "",
+      validationOutcome: result.validationOutcome ?? "not_run",
+      unexpectedChangedFiles: result.unexpectedChangedFiles ?? [],
+      worktreeCleanedUp: result.worktreeCleanedUp ?? true,
     })),
+    patchSignals: memory.patchSignals,
     commandSignals: memory.commandSignals,
     commandResults: memory.commandResults.map((result) => ({
       command: result.command,
@@ -156,7 +190,11 @@ export function getCommandDecisionSignature(memory: WorkingMemorySnapshot): stri
     patchResults: memory.patchResults.map((result) => ({
       edits: result.edits.map((edit) => `${edit.changeType}:${edit.path}`),
       validationCommand: result.validationCommand ?? "",
+      validationOutcome: result.validationOutcome ?? "not_run",
+      unexpectedChangedFiles: result.unexpectedChangedFiles ?? [],
+      worktreeCleanedUp: result.worktreeCleanedUp ?? true,
     })),
+    patchSignals: memory.patchSignals,
     nonCommandToolCalls: memory.toolCalls
       .filter((call) => call.toolName !== "run_command")
       .map((call) => `${call.toolName}:${call.signature}:${call.suppressed ? "suppressed" : "executed"}`),

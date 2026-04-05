@@ -161,7 +161,7 @@ export function extractPatchPatterns(runs: WorkflowRunRecord[]): string[] {
     runs.flatMap((run) =>
       (((run.artifacts.patchResults as AppliedCodePatchResult[] | undefined) ?? [])).map(
         (result) =>
-          `${result.validationCommand ?? "none"}:${result.edits
+          `${result.validationOutcome ?? "not_run"}:${result.validationCommand ?? "none"}:unexpected=${result.unexpectedChangedFiles?.length ?? 0}:${result.edits
             .map((edit) => edit.path.split("/").slice(-2).join("/"))
             .join("|")}`,
       ),
@@ -189,7 +189,7 @@ export function summarizeRelevantRuns(runs: WorkflowRunRecord[]): string {
       const patchSummary = (((run.artifacts.patchResults as AppliedCodePatchResult[] | undefined) ?? []))
         .map(
           (result) =>
-            `${result.edits.length} edit(s)${result.validationCommand ? `/${result.validationCommand}` : ""}`,
+            `${result.edits.length} edit(s)${result.validationCommand ? `/${result.validationCommand}` : ""}:${result.validationOutcome ?? "not_run"}:unexpected=${result.unexpectedChangedFiles?.length ?? 0}`,
         )
         .join(", ") || "none";
 

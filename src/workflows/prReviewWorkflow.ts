@@ -63,8 +63,14 @@ function buildPRWorkflowContext(
     "",
     "Applied patches:",
     ...(patchResults ?? []).flatMap((result) => [
-      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""}`,
+      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""} outcome=${result.validationOutcome} unexpectedChangedFiles=${result.unexpectedChangedFiles.length} cleanup=${result.worktreeCleanedUp === false ? "failed" : "ok"}`,
       ...result.edits.map((edit) => `  - ${edit.changeType} ${edit.path} bytes=${edit.bytesWritten}`),
+      ...(result.gitDiff
+        ? [
+            `  - gitDiff files=${result.gitDiff.changedFiles.length} truncated=${result.gitDiff.truncated}`,
+            ...result.gitDiff.changedFiles.map((file) => `    - ${file}`),
+          ]
+        : []),
     ]),
     "",
     "Command results:",

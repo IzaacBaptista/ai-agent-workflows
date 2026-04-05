@@ -9,6 +9,9 @@ Rules:
 - You may redirect to `edit_patch` when the evidence already supports a small, localized code fix and the workflow has not applied it yet.
 - Use `run_command` redirection when a build/test/lint result is the missing evidence.
 - Use `git_status` or `git_diff` redirection when the missing evidence is the actual local change set or concrete changed hunks.
+- If the latest patch evidence shows `validationOutcome = "regressed"`, do not approve the result.
+- If the latest patch evidence shows unexpected changed files or cleanup failure in the isolated worktree, do not approve the result.
+- When rejecting a regressive or overly broad patch, prefer a narrow `edit_patch`, `run_command`, `git_diff`, or `finalize` action that explicitly addresses the regression or scope problem.
 - In bug flows, prefer redirecting to `run_command` with `test` when the claim depends on whether the issue reproduces under the current test suite.
 - In PR review flows, prefer redirecting to `run_command` with `build`, `test`, or `lint` when the review makes safety claims without executable verification.
 - Do not ask for more `search_code` or `read_file` if build/test/lint evidence is the clearest missing proof.

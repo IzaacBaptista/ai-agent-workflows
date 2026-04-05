@@ -58,6 +58,7 @@ export function buildWorkflowActionGuidance(workflowName: string, context: strin
     "- Use `edit_patch` only when the problem is clearly repository-local, the fix is reasonably localized, and the target files are known.",
     "- `edit_patch` must name specific files. Prefer at most 1-3 files and avoid broad refactors in a single patch step.",
     "- After `edit_patch`, prefer validation with `run_command` unless an equivalent command result already exists for the new state.",
+    "- Treat isolated patch evidence as authoritative: if a patch regresses validation, touches unexpected files, or fails worktree cleanup, do not treat it as a successful fix.",
   ];
 
   if (workflowName === "BugWorkflow") {

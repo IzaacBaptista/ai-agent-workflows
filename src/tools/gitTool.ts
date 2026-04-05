@@ -9,8 +9,8 @@ interface SpawnResult {
 }
 
 interface GitToolExecutor {
-  getStatus(): Promise<GitStatusResult>;
-  getDiff(staged: boolean): Promise<GitDiffResult>;
+  getStatus(cwd?: string): Promise<GitStatusResult>;
+  getDiff(staged: boolean, cwd?: string): Promise<GitDiffResult>;
 }
 
 const MAX_DIFF_CHARS = 8000;
@@ -47,13 +47,13 @@ function parseChangedFiles(diff: string): string[] {
   return Array.from(new Set(files));
 }
 
-async function runGitCommand(args: string[]): Promise<SpawnResult> {
+async function runGitCommand(args: string[], cwd?: string): Promise<SpawnResult> {
   return new Promise<SpawnResult>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
 
     const child = spawn("git", args, {
-      cwd: process.cwd(),
+      cwd: cwd ?? process.cwd(),
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
@@ -79,8 +79,8 @@ async function runGitCommand(args: string[]): Promise<SpawnResult> {
   });
 }
 
-async function defaultGitToolExecutorStatus(): Promise<GitStatusResult> {
-  const result = await runGitCommand(["status", "--short"]);
+async function defaultGitToolExecutorStatus(cwd?: string): Promise<GitStatusResult> {
+  const result = await runGitCommand(["status", "--short"], cwd);
   if (result.exitCode !== 0) {
     throw new Error(`git status failed: ${result.stderr.trim() || `exit code ${result.exitCode ?? "null"}`}`);
   }
@@ -91,9 +91,9 @@ async function defaultGitToolExecutorStatus(): Promise<GitStatusResult> {
   };
 }
 
-async function defaultGitToolExecutorDiff(staged: boolean): Promise<GitDiffResult> {
+async function defaultGitToolExecutorDiff(staged: boolean, cwd?: string): Promise<GitDiffResult> {
   const args = staged ? ["diff", "--cached", "--no-ext-diff", "--unified=3"] : ["diff", "--no-ext-diff", "--unified=3"];
-  const result = await runGitCommand(args);
+  const result = await runGitCommand(args, cwd);
   if (result.exitCode !== 0) {
     throw new Error(`git diff failed: ${result.stderr.trim() || `exit code ${result.exitCode ?? "null"}`}`);
   }
@@ -124,6 +124,14 @@ export async function getGitStatus(): Promise<GitStatusResult> {
   return gitToolExecutor.getStatus();
 }
 
+export async function getGitStatusAt(cwd: string): Promise<GitStatusResult> {
+  return gitToolExecutor.getStatus(cwd);
+}
+
 export async function getGitDiff(staged = false): Promise<GitDiffResult> {
   return gitToolExecutor.getDiff(staged);
+}
+
+export async function getGitDiffAt(cwd: string, staged = false): Promise<GitDiffResult> {
+  return gitToolExecutor.getDiff(staged, cwd);
 }

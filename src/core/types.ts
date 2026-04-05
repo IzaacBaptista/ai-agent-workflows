@@ -233,10 +233,20 @@ export interface AppliedCodePatchEdit {
   bytesWritten: number;
 }
 
+export type PatchValidationOutcome = "not_run" | "improved" | "unchanged" | "regressed";
+
 export interface AppliedCodePatchResult {
   summary: string;
   edits: AppliedCodePatchEdit[];
   validationCommand?: WorkflowCommandName;
+  validationBefore?: CommandExecutionResult;
+  validationAfter?: CommandExecutionResult;
+  validationOutcome: PatchValidationOutcome;
+  gitStatus?: GitStatusResult;
+  gitDiff?: GitDiffResult;
+  unexpectedChangedFiles: string[];
+  isolationMode: "direct" | "isolated_worktree";
+  worktreeCleanedUp?: boolean;
 }
 
 export interface GitStatusEntry {
@@ -291,6 +301,7 @@ export interface WorkingMemorySnapshot {
   lastCritique?: WorkflowCritique;
   toolCalls: WorkflowToolCallRecord[];
   patchResults: AppliedCodePatchResult[];
+  patchSignals: string[];
   delegations: WorkflowDelegationRecord[];
   commandResults: CommandExecutionResult[];
   commandSignals: string[];

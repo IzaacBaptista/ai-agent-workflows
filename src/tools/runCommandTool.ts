@@ -27,7 +27,10 @@ const allowedCommands: Record<WorkflowCommandName, AllowedCommandSpec> = {
   },
 };
 
-type RunCommandExecutor = (commandName: WorkflowCommandName) => Promise<CommandExecutionResult>;
+type RunCommandExecutor = (
+  commandName: WorkflowCommandName,
+  options?: { cwd?: string },
+) => Promise<CommandExecutionResult>;
 
 function truncateOutput(value: string): string {
   if (value.length <= MAX_OUTPUT_CHARS) {
@@ -37,7 +40,10 @@ function truncateOutput(value: string): string {
   return `${value.slice(0, MAX_OUTPUT_CHARS)}...`;
 }
 
-async function defaultRunCommandExecutor(commandName: WorkflowCommandName): Promise<CommandExecutionResult> {
+async function defaultRunCommandExecutor(
+  commandName: WorkflowCommandName,
+  options: { cwd?: string } = {},
+): Promise<CommandExecutionResult> {
   const spec = allowedCommands[commandName];
   const startedAt = Date.now();
 
@@ -48,7 +54,7 @@ async function defaultRunCommandExecutor(commandName: WorkflowCommandName): Prom
     let settled = false;
 
     const child = spawn(spec.command, spec.args, {
-      cwd: process.cwd(),
+      cwd: options.cwd ?? process.cwd(),
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
@@ -109,6 +115,9 @@ export function setRunCommandExecutorForTesting(executor?: RunCommandExecutor): 
   runCommandExecutor = executor ?? defaultRunCommandExecutor;
 }
 
-export async function runAllowedCommand(commandName: WorkflowCommandName): Promise<CommandExecutionResult> {
-  return runCommandExecutor(commandName);
+export async function runAllowedCommand(
+  commandName: WorkflowCommandName,
+  options?: { cwd?: string },
+): Promise<CommandExecutionResult> {
+  return runCommandExecutor(commandName, options);
 }
