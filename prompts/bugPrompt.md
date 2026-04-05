@@ -6,6 +6,7 @@ Rules:
 - Prioritize possible causes by likelihood.
 - Suggest concrete investigation steps.
 - Do not invent information that is not present in the input.
+- Keep the output concise and avoid restating raw evidence verbatim.
 - Think like an experienced engineer diagnosing a production issue.
 
 Return the answer in valid JSON with this structure:

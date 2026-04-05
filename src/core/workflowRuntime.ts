@@ -602,7 +602,10 @@ export class WorkflowRuntime {
 
     const validatedInput = validateWorkflowToolInput(action.toolName, action.input);
     if (!validatedInput.success) {
-      this.recordBlockedAction(action, `Invalid input for tool "${action.toolName}"`);
+      this.recordBlockedAction(
+        action,
+        `Invalid input for tool "${action.toolName}": ${validatedInput.error}`,
+      );
       const duplicate = this.recordValidationError(
         "tool",
         `Invalid input for tool "${action.toolName}": ${validatedInput.error}`,
@@ -686,21 +689,35 @@ export class WorkflowRuntime {
       return suppressedResult;
     }
 
-    const result = await this.executeStep(
-      "tool_call",
-      async () =>
-        executeWorkflowTool({
+    let result: WorkflowToolResult;
+    try {
+      result = await this.executeStep(
+        "tool_call",
+        async () =>
+          executeWorkflowTool({
+            toolName,
+            input: validatedInput.data,
+          }),
+        {
+          inputSummary: action.reason,
+          outputSummary: (value) => (value as WorkflowToolResult).summary,
+          actionType: "tool_call",
           toolName,
-          input: validatedInput.data,
-        }),
-      {
-        inputSummary: action.reason,
-        outputSummary: (value) => (value as WorkflowToolResult).summary,
-        actionType: "tool_call",
-        toolName,
-        signature,
-      },
-    );
+          signature,
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const duplicate = this.recordValidationError(
+        "tool",
+        `Tool "${toolName}" failed: ${message}`,
+        `${signature}:execution`,
+      );
+      if (duplicate) {
+        this.forceFinalAnalysis(`Repeated tool failure for "${toolName}"`);
+      }
+      return undefined;
+    }
 
     this.updateStats((current) => ({
       ...current,

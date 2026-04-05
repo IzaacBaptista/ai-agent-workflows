@@ -19,6 +19,8 @@ Rules:
 - Use only the runtime actions, tools, and agents listed in the prompt.
 - Keep redirections short. Do not recommend unnecessary loops.
 - If approved, omit `nextAction`.
+- If you are not certain about the exact next action, omit `nextAction` instead of inventing one.
+- `nextAction.type` must exactly match one valid runtime action type.
 - Return valid JSON only.
 
 Return the answer in valid JSON with this structure:

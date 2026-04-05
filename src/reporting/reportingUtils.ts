@@ -208,6 +208,16 @@ function countFailedAttempts(
   ).length;
 }
 
+function hasStepAttempt(
+  runRecord: WorkflowRunRecord | null,
+  name: string,
+  predicate?: (step: WorkflowStepRecord) => boolean,
+): boolean {
+  return (runRecord?.steps ?? []).some(
+    (step) => step.name === name && !step.suppressed && (!predicate || predicate(step)),
+  );
+}
+
 function hasCompletedStep(
   runRecord: WorkflowRunRecord | null,
   name: string,
@@ -236,6 +246,9 @@ export function buildNarrativeWhatHappened<T>(
 ): string[] {
   const bullets: string[] = [];
   const meta = result.meta;
+  const attemptedSearch = hasStepAttempt(runRecord, "tool_call", (step) => step.toolName === "search_code");
+  const attemptedRead = hasStepAttempt(runRecord, "tool_call", (step) => step.toolName === "read_file");
+  const attemptedCommands = hasStepAttempt(runRecord, "tool_call", (step) => step.toolName === "run_command");
   const usedSearch = hasCompletedStep(runRecord, "tool_call", (step) => step.toolName === "search_code");
   const usedRead = hasCompletedStep(runRecord, "tool_call", (step) => step.toolName === "read_file");
   const usedCommands = hasCompletedStep(runRecord, "tool_call", (step) => step.toolName === "run_command");
@@ -252,17 +265,34 @@ export function buildNarrativeWhatHappened<T>(
   const hasFinalize = (runRecord?.steps ?? []).some((step) => step.name === "finalize");
   const finalizeTimeouts = countFailedAttempts(runRecord, "finalize", /timed out/i);
   const failureSummary = extractFailureSummary(result, runRecord).toLowerCase();
+  const hasToolAttempt = attemptedSearch || attemptedRead || attemptedCommands;
 
-  if (meta.toolCallCount === 0 && !usedDelegation && !usedEditPatch) {
+  if (!hasToolAttempt && !usedDelegation && !usedEditPatch) {
     bullets.push("The system analyzed the issue without using tools.");
-  } else if (usedSearch && usedRead) {
-    bullets.push("The system performed iterative investigation using code search and file reads.");
-  } else if (usedSearch) {
-    bullets.push("The system investigated the repository using code search.");
-  } else if (usedRead) {
-    bullets.push("The system inspected repository files directly.");
-  } else if (usedCommands) {
-    bullets.push("The system gathered executable evidence with local command runs.");
+  } else if (attemptedSearch && attemptedRead) {
+    bullets.push(
+      usedSearch && usedRead
+        ? "The system performed iterative investigation using code search and file reads."
+        : "The system attempted iterative investigation using code search and file reads.",
+    );
+  } else if (attemptedSearch) {
+    bullets.push(
+      usedSearch
+        ? "The system investigated the repository using code search."
+        : "The system attempted to investigate the repository using code search.",
+    );
+  } else if (attemptedRead) {
+    bullets.push(
+      usedRead
+        ? "The system inspected repository files directly."
+        : "The system attempted to inspect repository files directly.",
+    );
+  } else if (attemptedCommands) {
+    bullets.push(
+      usedCommands
+        ? "The system gathered executable evidence with local command runs."
+        : "The system attempted to gather executable evidence with local command runs.",
+    );
   }
 
   if (meta.replanCount >= 2) {
@@ -273,7 +303,7 @@ export function buildNarrativeWhatHappened<T>(
     bullets.push("It delegated part of the verification to another agent.");
   } else if (usedEditPatch) {
     bullets.push("It attempted an autonomous code patch.");
-  } else if (hasFinalize && meta.toolCallCount === 0 && finalizeTimeouts > 0) {
+  } else if (hasFinalize && !hasToolAttempt && finalizeTimeouts > 0) {
     bullets.push("It attempted to generate a final proposal.");
   }
 
@@ -308,13 +338,13 @@ export function getBehaviorSignal(meta: WorkflowExecutionMeta, runRecord: Workfl
   const failure = (runRecord?.error ?? "").toLowerCase();
   const forcedReason = String(runRecord?.artifacts.forcedFinalAnalysisReason ?? "").toLowerCase();
   const hasDelegateStep = (runRecord?.steps ?? []).some(
-    (step) => step.actionType === "delegate" && step.status === "completed" && !step.blocked,
+    (step) => step.actionType === "delegate" && !step.suppressed,
   );
   const hasEditPatchStep = (runRecord?.steps ?? []).some(
-    (step) => step.actionType === "edit_patch" && step.status === "completed" && !step.blocked,
+    (step) => step.actionType === "edit_patch" && !step.suppressed,
   );
   const hasToolStep = (runRecord?.steps ?? []).some(
-    (step) => step.actionType === "tool_call" && step.status === "completed" && !step.blocked,
+    (step) => step.actionType === "tool_call" && !step.suppressed,
   );
   const hasLoopSignal =
     meta.replanCount >= 3 || failure.includes("maxsteps") || forcedReason.includes("no progress");
@@ -327,7 +357,7 @@ export function getBehaviorSignal(meta: WorkflowExecutionMeta, runRecord: Workfl
     return "delegated verification";
   }
 
-  if (hasLoopSignal && meta.toolCallCount > 0) {
+  if (hasLoopSignal && hasToolStep) {
     return "iterative investigation with replanning loop";
   }
 
@@ -335,7 +365,7 @@ export function getBehaviorSignal(meta: WorkflowExecutionMeta, runRecord: Workfl
     return "tool-driven investigation";
   }
 
-  if (meta.toolCallCount === 0 && meta.editActionCount === 0 && meta.delegationCount === 0) {
+  if (!hasToolStep && meta.editActionCount === 0 && meta.delegationCount === 0) {
     return "pure reasoning (no tool usage)";
   }
 

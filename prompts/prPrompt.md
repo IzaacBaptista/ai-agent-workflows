@@ -7,6 +7,7 @@ Rules:
 - Point out risks, security concerns, and potential regressions.
 - Suggest concrete improvements where applicable.
 - Recommend tests that should be added or updated.
+- Keep the review concise and avoid repeating the raw diff/context verbatim.
 
 Return the answer in valid JSON with this structure:
 {

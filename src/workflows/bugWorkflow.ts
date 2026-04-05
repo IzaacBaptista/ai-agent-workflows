@@ -14,6 +14,14 @@ import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
 import {
+  summarizeCodeSearchResults,
+  summarizeCommandResults,
+  summarizeFileReadResults,
+  summarizePatchResults,
+  summarizeStringList,
+  summarizeUnknownValue,
+} from "./contextSummary";
+import {
   logAgentExecutionFailure,
   logAgentExecutionSuccess,
   startAgentExecution,
@@ -34,49 +42,19 @@ function buildBugWorkflowContext(
     "Triage summary:",
     triage?.summary ?? "No triage available",
     "",
-    "Initial hypotheses:",
-    ...(triage?.hypotheses ?? []).map((item) => `- ${item}`),
+    ...summarizeStringList("Initial hypotheses:", triage?.hypotheses),
     "",
-    "Suggested API checks:",
-    ...(triage?.apiChecks ?? []).map((item) => `- ${item}`),
+    ...summarizeStringList("Suggested API checks:", triage?.apiChecks),
     "",
-    "Code search results:",
-    ...Object.entries(codeSearchResults ?? {}).flatMap(([term, matches]) => {
-      if (matches.length === 0) {
-        return [`- ${term}: no matches found`];
-      }
-
-      return [
-        `- ${term}:`,
-        ...matches.map(
-          (match) => `  - ${match.file}:${match.line} ${match.snippet.replace(/\n/g, " ").trim()}`,
-        ),
-      ];
-    }),
+    ...summarizeCodeSearchResults(codeSearchResults),
     "",
-    "Read file results:",
-    ...(fileReadResults ?? []).map((file) => `- ${file.file}: ${file.content.replace(/\n/g, " ").trim()}`),
+    ...summarizeFileReadResults(fileReadResults),
     "",
-    "External API result:",
-    externalApiResult ? JSON.stringify(externalApiResult) : "No external API result",
+    ...summarizeUnknownValue("External API result:", externalApiResult, "No external API result"),
     "",
-    "Applied patches:",
-    ...(patchResults ?? []).flatMap((result) => [
-      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""} outcome=${result.validationOutcome} unexpectedChangedFiles=${result.unexpectedChangedFiles.length} cleanup=${result.worktreeCleanedUp === false ? "failed" : "ok"}`,
-      ...result.edits.map((edit) => `  - ${edit.changeType} ${edit.path} bytes=${edit.bytesWritten}`),
-      ...(result.gitDiff
-        ? [
-            `  - gitDiff files=${result.gitDiff.changedFiles.length} truncated=${result.gitDiff.truncated}`,
-            ...result.gitDiff.changedFiles.map((file) => `    - ${file}`),
-          ]
-        : []),
-    ]),
+    ...summarizePatchResults(patchResults),
     "",
-    "Command results:",
-    ...(commandResults ?? []).map(
-      (result) =>
-        `- ${result.command}: exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${result.stdout.replace(/\n/g, " ").trim()} stderr=${result.stderr.replace(/\n/g, " ").trim()}`,
-    ),
+    ...summarizeCommandResults(commandResults),
   ].join("\n");
 }
 

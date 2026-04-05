@@ -14,6 +14,13 @@ import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
 import {
+  summarizeCodeSearchResults,
+  summarizeCommandResults,
+  summarizeFileReadResults,
+  summarizePatchResults,
+  summarizeStringList,
+} from "./contextSummary";
+import {
   logAgentExecutionFailure,
   logAgentExecutionSuccess,
   startAgentExecution,
@@ -34,46 +41,17 @@ function buildIssueWorkflowContext(
     "Triage summary:",
     triage?.summary ?? "No triage available",
     "",
-    "Investigation areas:",
-    ...(triage?.investigationAreas ?? []).map((item) => `- ${item}`),
+    ...summarizeStringList("Investigation areas:", triage?.investigationAreas),
     "",
-    "Validation checks:",
-    ...(triage?.validationChecks ?? []).map((item) => `- ${item}`),
+    ...summarizeStringList("Validation checks:", triage?.validationChecks),
     "",
-    "Code search results:",
-    ...Object.entries(codeSearchResults ?? {}).flatMap(([term, matches]) => {
-      if (matches.length === 0) {
-        return [`- ${term}: no matches found`];
-      }
-
-      return [
-        `- ${term}:`,
-        ...matches.map(
-          (match) => `  - ${match.file}:${match.line} ${match.snippet.replace(/\n/g, " ").trim()}`,
-        ),
-      ];
-    }),
+    ...summarizeCodeSearchResults(codeSearchResults),
     "",
-    "Read file results:",
-    ...(fileReadResults ?? []).map((file) => `- ${file.file}: ${file.content.replace(/\n/g, " ").trim()}`),
+    ...summarizeFileReadResults(fileReadResults),
     "",
-    "Applied patches:",
-    ...(patchResults ?? []).flatMap((result) => [
-      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""} outcome=${result.validationOutcome} unexpectedChangedFiles=${result.unexpectedChangedFiles.length} cleanup=${result.worktreeCleanedUp === false ? "failed" : "ok"}`,
-      ...result.edits.map((edit) => `  - ${edit.changeType} ${edit.path} bytes=${edit.bytesWritten}`),
-      ...(result.gitDiff
-        ? [
-            `  - gitDiff files=${result.gitDiff.changedFiles.length} truncated=${result.gitDiff.truncated}`,
-            ...result.gitDiff.changedFiles.map((file) => `    - ${file}`),
-          ]
-        : []),
-    ]),
+    ...summarizePatchResults(patchResults),
     "",
-    "Command results:",
-    ...(commandResults ?? []).map(
-      (result) =>
-        `- ${result.command}: exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${result.stdout.replace(/\n/g, " ").trim()} stderr=${result.stderr.replace(/\n/g, " ").trim()}`,
-    ),
+    ...summarizeCommandResults(commandResults),
   ].join("\n");
 }
 
@@ -113,7 +91,14 @@ function buildReplanContext(
   ].join("\n");
 }
 
-const REPO_LOCAL_PHRASES = ["this repo", "this repository", "codebase", "project"];
+const REPO_LOCAL_PHRASES = [
+  "this repo",
+  "this repository",
+  "this codebase",
+  "this project",
+  "repo-local",
+  "repository-local",
+];
 const REPO_LOCAL_IDENTIFIERS = [
   "WorkflowRuntime",
   "PlannerAgent",
@@ -122,10 +107,6 @@ const REPO_LOCAL_IDENTIFIERS = [
   "IssueWorkflow",
   "BugWorkflow",
   "PRReviewWorkflow",
-  "search_code",
-  "read_file",
-  "run_command",
-  "edit_patch",
 ];
 
 function isClearlyRepoLocalIssue(issue: string): boolean {

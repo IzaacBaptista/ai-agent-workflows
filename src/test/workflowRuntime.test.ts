@@ -303,6 +303,133 @@ test("WorkflowRuntime safely replans after an invalid tool request", async () =>
   );
 });
 
+test("WorkflowRuntime safely replans after a blocked read_file request", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "RuntimeBlockedReadFileWorkflow",
+    input: "blocked read_file input",
+    policy: {
+      maxSteps: 8,
+      maxRetriesPerStep: 0,
+      timeoutMs: 1000,
+    },
+  });
+
+  const definition = createDefinition({
+    workflowName: "RuntimeBlockedReadFileWorkflow",
+    runPlanner: async () => ({
+      summary: "blocked read_file plan",
+      actions: [
+        {
+          type: "tool_call",
+          toolName: "read_file",
+          input: { files: ["core/workflowRuntime.ts"] },
+          reason: "Try reading a file outside the allowed scope",
+        },
+        {
+          type: "finalize",
+          task: "finish after blocked read_file",
+          reason: "recover through replan",
+        },
+      ],
+    }),
+    runReplanner: async () => ({
+      summary: "recover from blocked read_file",
+      actions: [
+        {
+          type: "finalize",
+          task: "finish after blocked read_file",
+          reason: "recover through replan",
+        },
+      ],
+    }),
+  });
+
+  const result = await runtime.runActionQueue(definition, "blocked read_file input");
+
+  assert.equal(result.note, "finish after blocked read_file:1");
+  assert.equal(
+    runtime.getRunRecord().steps.some(
+      (step) =>
+        step.blocked === true &&
+        step.actionType === "tool_call" &&
+        step.toolName === "read_file" &&
+        /outside the allowed read scope/i.test(step.outputSummary ?? ""),
+    ),
+    true,
+  );
+});
+
+test("WorkflowRuntime safely replans after a tool execution failure", async () => {
+  setRunCommandExecutorForTesting(async () => {
+    throw new Error("build runner unavailable");
+  });
+
+  try {
+    const runtime = new WorkflowRuntime({
+      workflowName: "RuntimeToolFailureWorkflow",
+      input: "tool failure input",
+      policy: {
+        maxSteps: 8,
+        maxRetriesPerStep: 0,
+        timeoutMs: 1000,
+      },
+    });
+
+    const definition = createDefinition({
+      workflowName: "RuntimeToolFailureWorkflow",
+      runPlanner: async () => ({
+        summary: "tool execution failure plan",
+        actions: [
+          {
+            type: "tool_call",
+            toolName: "run_command",
+            input: { command: "build" },
+            reason: "Compile before finalizing",
+          },
+          {
+            type: "finalize",
+            task: "finish after failed command",
+            reason: "recover through replan",
+          },
+        ],
+      }),
+      runReplanner: async () => ({
+        summary: "recover after failed command",
+        actions: [
+          {
+            type: "finalize",
+            task: "finish after failed command",
+            reason: "recover through replan",
+          },
+        ],
+      }),
+    });
+
+    const result = await runtime.runActionQueue(definition, "tool failure input");
+
+    assert.equal(result.note, "finish after failed command:1");
+    assert.equal(
+      runtime.getRunRecord().steps.some(
+        (step) =>
+          step.actionType === "tool_call" &&
+          step.toolName === "run_command" &&
+          step.status === "failed" &&
+          /build runner unavailable/i.test(step.error ?? ""),
+      ),
+      true,
+    );
+    const validationErrors = runtime.getRunRecord().artifacts.validationErrors as Array<{ kind: string; message: string }>;
+    assert.equal(
+      validationErrors.some(
+        (entry) => entry.kind === "tool" && /build runner unavailable/i.test(entry.message),
+      ),
+      true,
+    );
+  } finally {
+    setRunCommandExecutorForTesting();
+  }
+});
+
 test("WorkflowRuntime applies edit_patch and validates it with run_command", async () => {
   const runtime = new WorkflowRuntime({
     workflowName: "RuntimeEditPatchWorkflow",

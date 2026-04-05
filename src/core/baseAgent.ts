@@ -62,8 +62,12 @@ function extractResponseText(response: unknown): string {
 export abstract class BaseAgent<TOutput> {
   abstract run(input: string): Promise<TOutput>;
 
-  protected parseResponse(response: unknown, schema: ZodSchema<TOutput>): TOutput {
-    const responseText = extractResponseText(response);
+  protected getResponseText(response: unknown): string {
+    return extractResponseText(response);
+  }
+
+  protected parseResponseJson(response: unknown): unknown {
+    const responseText = this.getResponseText(response);
 
     let parsedJson: unknown;
 
@@ -73,6 +77,12 @@ export abstract class BaseAgent<TOutput> {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`LLM returned invalid JSON: ${message}`);
     }
+
+    return parsedJson;
+  }
+
+  protected parseResponse(response: unknown, schema: ZodSchema<TOutput>): TOutput {
+    const parsedJson = this.parseResponseJson(response);
 
     try {
       return schema.parse(parsedJson);

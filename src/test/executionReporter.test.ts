@@ -240,6 +240,59 @@ test("RunSummaryFormatter renders an issue-like pure reasoning failure", () => {
   assert.match(output, /Behavior:\npure reasoning \(no tool usage\)/);
 });
 
+test("RunSummaryFormatter treats failed tool attempts as tool-driven investigation", () => {
+  const runRecord = createRunRecord({
+    workflowName: "IssueWorkflow",
+    status: "failed",
+    input: "WorkflowRuntime in this repo still retries read_file after blocked input",
+    error: "File \"core/workflowRuntime.ts\" is outside the allowed read scope",
+    steps: [
+      {
+        stepId: "plan:1:1",
+        name: "plan",
+        status: "completed",
+        attempt: 1,
+        startedAt: "2026-04-05T13:00:00.000Z",
+        completedAt: "2026-04-05T13:00:01.000Z",
+        agentName: "PlannerAgent",
+        inputSummary: "WorkflowRuntime in this repo still retries read_file after blocked input",
+        outputSummary: "actions=analyze,tool_call,finalize",
+        actionType: "plan",
+      },
+      {
+        stepId: "tool_call:2:1",
+        name: "tool_call",
+        status: "failed",
+        attempt: 1,
+        startedAt: "2026-04-05T13:00:01.000Z",
+        completedAt: "2026-04-05T13:00:02.000Z",
+        inputSummary: "Inspect WorkflowRuntime directly",
+        error: "File \"core/workflowRuntime.ts\" is outside the allowed read scope",
+        actionType: "tool_call",
+        toolName: "read_file",
+      },
+    ],
+  });
+  const result: WorkflowResult<{ summary: string }> = {
+    success: false,
+    error: "File \"core/workflowRuntime.ts\" is outside the allowed read scope",
+    meta: createMeta({
+      workflowName: "IssueWorkflow",
+      status: "failed",
+      stepCount: 2,
+      critiqueCount: 0,
+      replanCount: 0,
+      toolCallCount: 0,
+    }),
+  };
+
+  const output = RunSummaryFormatter.format({ result, runRecord });
+
+  assert.match(output, /The system attempted to inspect repository files directly\./);
+  assert.doesNotMatch(output, /without using tools/);
+  assert.match(output, /Behavior:\ntool-driven investigation/);
+});
+
 test("RunTimelineFormatter groups attempts and includes failure reasons", () => {
   const runRecord = createRunRecord({
     steps: [

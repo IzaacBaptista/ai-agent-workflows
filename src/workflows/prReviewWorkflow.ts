@@ -16,6 +16,15 @@ import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
 import {
+  summarizeCodeSearchResults,
+  summarizeCommandResults,
+  summarizeFileReadResults,
+  summarizeGitDiffResult,
+  summarizeGitStatusResult,
+  summarizePatchResults,
+  summarizeStringList,
+} from "./contextSummary";
+import {
   logAgentExecutionFailure,
   logAgentExecutionSuccess,
   startAgentExecution,
@@ -38,66 +47,21 @@ function buildPRWorkflowContext(
     "Triage summary:",
     triage?.summary ?? "No triage available",
     "",
-    "Review focus:",
-    ...(triage?.reviewFocus ?? []).map((item) => `- ${item}`),
+    ...summarizeStringList("Review focus:", triage?.reviewFocus),
     "",
-    "Regression checks:",
-    ...(triage?.regressionChecks ?? []).map((item) => `- ${item}`),
+    ...summarizeStringList("Regression checks:", triage?.regressionChecks),
     "",
-    "Code search results:",
-    ...Object.entries(codeSearchResults ?? {}).flatMap(([term, matches]) => {
-      if (matches.length === 0) {
-        return [`- ${term}: no matches found`];
-      }
-
-      return [
-        `- ${term}:`,
-        ...matches.map(
-          (match) => `  - ${match.file}:${match.line} ${match.snippet.replace(/\n/g, " ").trim()}`,
-        ),
-      ];
-    }),
+    ...summarizeCodeSearchResults(codeSearchResults),
     "",
-    "Read file results:",
-    ...(fileReadResults ?? []).map((file) => `- ${file.file}: ${file.content.replace(/\n/g, " ").trim()}`),
+    ...summarizeFileReadResults(fileReadResults),
     "",
-    "Applied patches:",
-    ...(patchResults ?? []).flatMap((result) => [
-      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""} outcome=${result.validationOutcome} unexpectedChangedFiles=${result.unexpectedChangedFiles.length} cleanup=${result.worktreeCleanedUp === false ? "failed" : "ok"}`,
-      ...result.edits.map((edit) => `  - ${edit.changeType} ${edit.path} bytes=${edit.bytesWritten}`),
-      ...(result.gitDiff
-        ? [
-            `  - gitDiff files=${result.gitDiff.changedFiles.length} truncated=${result.gitDiff.truncated}`,
-            ...result.gitDiff.changedFiles.map((file) => `    - ${file}`),
-          ]
-        : []),
-    ]),
+    ...summarizePatchResults(patchResults),
     "",
-    "Command results:",
-    ...(commandResults ?? []).map(
-      (result) =>
-        `- ${result.command}: exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${result.stdout.replace(/\n/g, " ").trim()} stderr=${result.stderr.replace(/\n/g, " ").trim()}`,
-    ),
+    ...summarizeCommandResults(commandResults),
     "",
-    "Git status:",
-    ...(gitStatusResult
-      ? gitStatusResult.entries.length > 0
-        ? gitStatusResult.entries.map(
-            (entry) => `- ${entry.indexStatus}${entry.workingTreeStatus} ${entry.path}`,
-          )
-        : ["- clean working tree"]
-      : ["No git status result"]),
+    ...summarizeGitStatusResult(gitStatusResult),
     "",
-    "Git diff:",
-    ...(gitDiffResult
-      ? [
-          `- staged=${gitDiffResult.staged} files=${gitDiffResult.changedFiles.length} truncated=${gitDiffResult.truncated}`,
-          ...gitDiffResult.changedFiles.map((file) => `  - ${file}`),
-          gitDiffResult.diff.length > 0
-            ? `- diff preview: ${gitDiffResult.diff.replace(/\n/g, " ").trim()}`
-            : "- no diff output",
-        ]
-      : ["No git diff result"]),
+    ...summarizeGitDiffResult(gitDiffResult),
   ].join("\n");
 }
 

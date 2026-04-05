@@ -6,6 +6,7 @@ Rules:
 - Do not invent business rules that are not present in the input.
 - Clearly separate assumptions from confirmed information.
 - Prefer concise and actionable output.
+- Keep each list concise; prefer the strongest 3-6 items instead of exhaustive repetition.
 - Think like an engineer, QA analyst, and product partner.
 
 Return the answer in valid JSON with this structure:

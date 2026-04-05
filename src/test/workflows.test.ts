@@ -302,6 +302,143 @@ test("runIssueWorkflow still allows non-repo-local issues to finalize without fo
   }
 });
 
+test("runIssueWorkflow does not force repo inspection for conceptual search_code loop issues", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  const responses = [
+    buildLlmResponse({
+      summary: "Issue workflow plan",
+      actions: [
+        {
+          type: "analyze",
+          stage: "triage",
+          task: "Clarify the planner behavior issue",
+          reason: "Need triage first",
+        },
+        {
+          type: "finalize",
+          task: "Deliver the planner enforcement proposal",
+          reason: "Finalize after triage",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Issue triage summary",
+      investigationAreas: ["planner decision loops"],
+      codeSearchTerms: ["search_code", "planner"],
+      validationChecks: ["confirm whether this is conceptual or repo-local"],
+    }),
+    buildLlmResponse({
+      summary: "Finalize after triage",
+      actions: [
+        {
+          type: "finalize",
+          task: "Deliver the planner enforcement proposal",
+          reason: "This issue is conceptual and does not require forced repo inspection",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Issue analysis summary",
+      questions: ["When should the planner pivot?"],
+      acceptanceCriteria: ["The planner stops redundant search loops"],
+      technicalPlan: ["Add deduplication and no-progress guards"],
+      testScenarios: ["No-match query does not repeat search_code"],
+      risks: ["Over-aggressive dedup blocks valid searches"],
+      assumptions: ["The issue is about planner behavior, not a specific file"],
+    }),
+    buildLlmResponse({
+      approved: true,
+      summary: "Looks good",
+      missingEvidence: [],
+      confidence: "high",
+    }),
+  ];
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const result = await runIssueWorkflow("The planner keeps generating redundant search_code steps");
+
+    assert.equal(result.success, true);
+    if (!result.success) {
+      return;
+    }
+
+    assert.equal(result.meta.toolCallCount, 0);
+    const runRecord = getRunMemory(result.meta.runId);
+    assert.equal(
+      runRecord.steps.some(
+        (step) => step.blocked === true && step.actionType === "finalize",
+      ),
+      false,
+    );
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+  }
+});
+
+test("runBugWorkflow tolerates critic output with an invalid nextAction type", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  const responses = [
+    buildLlmResponse({
+      summary: "Finalize directly",
+      actions: [
+        {
+          type: "finalize",
+          task: "Summarize the bug with the current evidence",
+          reason: "Enough evidence is already available",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Bug result",
+      possibleCauses: ["timeout cleanup is incomplete"],
+      investigationSteps: ["inspect the completion path"],
+      fixSuggestions: ["clear timeout handles on every exit path"],
+      risks: ["tests may keep hanging until cleanup is fixed"],
+    }),
+    buildLlmResponse({
+      approved: true,
+      summary: "Approved after dropping the invalid nextAction payload",
+      missingEvidence: [],
+      confidence: "high",
+      nextAction: {
+        type: "not_a_real_action",
+      },
+    }),
+  ];
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const result = await runBugWorkflow("WorkflowRuntime timeouts are not cleared");
+
+    assert.equal(result.success, true);
+    if (!result.success) {
+      return;
+    }
+
+    assert.equal(result.data.summary, "Bug result");
+    assert.equal(result.meta.critiqueCount, 1);
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+  }
+});
+
 test("runBugWorkflow uses relevant memory in planner input to avoid a repeated tool loop", async () => {
   const priorRuntime = new WorkflowRuntime({
     workflowName: "BugWorkflow",

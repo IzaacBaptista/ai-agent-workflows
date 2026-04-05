@@ -11,7 +11,7 @@ import {
 import { ApiResponse, callExternalApi } from "./externalApiTool";
 import { CodeSearchResult, searchCode } from "./codeSearchTool";
 import { getGitDiff, getGitStatus } from "./gitTool";
-import { FileReadResult, readFiles } from "./readFileTool";
+import { FileReadResult, getReadFileValidationError, readFiles } from "./readFileTool";
 import { getAllowedCommandNames, isAllowedCommandName, runAllowedCommand } from "./runCommandTool";
 
 const searchCodeInputSchema = z.object({
@@ -106,6 +106,17 @@ export function validateWorkflowToolInput(
       success: false,
       error: parsed.error.message,
     };
+  }
+
+  if (toolName === "read_file") {
+    const readFileInput = readFileInputSchema.parse(parsed.data);
+    const readFileError = getReadFileValidationError(readFileInput.files);
+    if (readFileError) {
+      return {
+        success: false,
+        error: readFileError,
+      };
+    }
   }
 
   return { success: true, data: parsed.data };
