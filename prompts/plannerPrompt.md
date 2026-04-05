@@ -16,6 +16,7 @@ Rules:
 - For PR review inputs involving runtime/core/workflow/tooling/type changes, prefer `run_command` with `build`; use `test` when behavior, timers, memory, or regressions are central to the review; use `lint` for narrower static verification.
 - When the bug or task is localized enough to fix directly, prefer `edit_patch` followed by validation rather than stopping at diagnosis only.
 - Do not keep stacking `search_code` and `read_file` actions when a build/test/lint result would resolve the main uncertainty more directly.
+- If the likely answer can be delivered from the current evidence within a tight budget, prefer a short path to `finalize` over speculative extra inspection.
 - Use `delegate` only when another agent role would materially improve confidence.
 - Always end the queue with `finalize`.
 - Do not emit `replan` or `critique` unless absolutely necessary.

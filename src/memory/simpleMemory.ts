@@ -27,6 +27,32 @@ interface CreateRunMemoryInput {
   policy: WorkflowExecutionPolicy;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object";
+}
+
+function isWorkflowRunRecord(value: unknown): value is WorkflowRunRecord {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (
+    typeof value.runId !== "string" ||
+    typeof value.workflowName !== "string" ||
+    typeof value.status !== "string" ||
+    typeof value.input !== "string" ||
+    typeof value.startedAt !== "string"
+  ) {
+    return false;
+  }
+
+  if (!Array.isArray(value.steps) || !isRecord(value.policy) || !isRecord(value.artifacts)) {
+    return false;
+  }
+
+  return true;
+}
+
 function ensureRunStorageDir(): void {
   if (!existsSync(runStorageDir)) {
     mkdirSync(runStorageDir, { recursive: true });
@@ -92,7 +118,11 @@ function loadPersistedRuns(): void {
 
     try {
       const content = readFileSync(fullPath, "utf-8");
-      const run = JSON.parse(content) as WorkflowRunRecord;
+      const run = JSON.parse(content);
+      if (!isWorkflowRunRecord(run)) {
+        continue;
+      }
+
       runStore.set(run.runId, run);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -192,11 +222,11 @@ export function resetRunMemories(options: { clearPersistedRuns?: boolean } = {})
     ensureRunStorageDir();
 
     for (const fileName of readdirSync(runStorageDir)) {
-      if (!fileName.endsWith(".json") && !fileName.endsWith(".tmp")) {
+      if (!fileName.endsWith(".json") && !fileName.endsWith(".tmp") && fileName !== "_system") {
         continue;
       }
 
-      rmSync(join(runStorageDir, fileName), { force: true });
+      rmSync(join(runStorageDir, fileName), { force: true, recursive: fileName === "_system" });
     }
 
     return;

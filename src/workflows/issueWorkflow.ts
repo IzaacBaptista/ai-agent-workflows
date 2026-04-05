@@ -8,6 +8,8 @@ import {
   CommandExecutionResult,
   IssueAnalysis,
   IssueTriage,
+  RuntimeAction,
+  WorkflowValidationError,
   WorkflowResult,
 } from "../core/types";
 import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
@@ -15,10 +17,16 @@ import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
 import {
   summarizeCodeSearchResults,
+  summarizeCompletedAction,
   summarizeCommandResults,
+  summarizeEvidenceOverview,
   summarizeFileReadResults,
   summarizePatchResults,
+  summarizeRecentSteps,
+  summarizeRemainingActions,
+  summarizeRuntimeBudget,
   summarizeStringList,
+  summarizeValidationErrors,
 } from "./contextSummary";
 import {
   logAgentExecutionFailure,
@@ -69,25 +77,32 @@ function buildReplanContext(
   originalInput: string,
   completedAction: unknown,
   runtime: WorkflowRuntime,
-  remainingActions: unknown[],
+  remainingActions: RuntimeAction[],
 ): string {
   const run = runtime.getRunRecord();
+  const meta = runtime.getMeta();
+  const validationErrors = run.artifacts.validationErrors as
+    | WorkflowValidationError[]
+    | undefined;
 
   return [
     "Original input:",
     originalInput,
     "",
-    "Completed action:",
-    JSON.stringify(completedAction),
+    ...summarizeCompletedAction(completedAction),
     "",
-    "Working artifacts:",
-    JSON.stringify(run.artifacts),
+    ...summarizeRuntimeBudget(run, meta),
     "",
-    "Executed steps:",
-    JSON.stringify(run.steps),
+    ...summarizeEvidenceOverview(run),
     "",
-    "Remaining actions:",
-    JSON.stringify(remainingActions),
+    ...summarizeRecentSteps(run.steps),
+    "",
+    ...summarizeValidationErrors(validationErrors),
+    "",
+    ...summarizeRemainingActions(remainingActions),
+    "",
+    "Guidance:",
+    "- If repository evidence is already sufficient and budget pressure is medium or high, prefer finalize over more search_code/read_file steps.",
   ].join("\n");
 }
 

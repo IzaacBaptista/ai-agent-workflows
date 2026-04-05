@@ -57,6 +57,7 @@ import {
   WorkflowValidationError,
   WorkingMemorySnapshot,
 } from "./types";
+import { isLlmProviderError } from "./llmClient";
 
 interface WorkflowRuntimeOptions {
   workflowName: string;
@@ -272,6 +273,10 @@ function getUnexpectedChangedFiles(changedFiles: string[], requestedFiles: strin
   return changedFiles.filter((file) => !requested.has(file.trim()));
 }
 
+function shouldRetryStepError(error: unknown): boolean {
+  return !isLlmProviderError(error);
+}
+
 export class WorkflowRuntime {
   readonly runId: string;
   readonly workflowName: string;
@@ -413,6 +418,39 @@ export class WorkflowRuntime {
     return next;
   }
 
+  private getRemainingStandardSteps(): number {
+    return Math.max(this.policy.maxSteps - this.stepCount, 0);
+  }
+
+  private hasConvergenceEvidence(): boolean {
+    const artifacts = this.getRunRecord().artifacts;
+    return Boolean(
+      artifacts.codeSearchResults ||
+        artifacts.fileReadResults ||
+        artifacts.commandResults ||
+        artifacts.patchResults ||
+        artifacts.gitStatusResult ||
+        artifacts.gitDiffResult ||
+        artifacts.externalApiResult,
+    );
+  }
+
+  private shouldForceConvergedFinalize(action: RuntimeAction): boolean {
+    if (action.type !== "tool_call") {
+      return false;
+    }
+
+    if (!["search_code", "read_file", "git_status", "git_diff"].includes(action.toolName)) {
+      return false;
+    }
+
+    return this.getRemainingStandardSteps() <= 1 && this.hasConvergenceEvidence();
+  }
+
+  private buildConvergenceGuardReason(action: Extract<RuntimeAction, { type: "tool_call" }>): string {
+    return `Convergence guard forced finalization before another ${action.toolName} because step budget is nearly exhausted and evidence is already available.`;
+  }
+
   private registerMemoryContext(stage: string, context: RelevantMemoryContext): RelevantMemoryContext {
     this.appendArtifactArray("memoryContext", {
       stage,
@@ -539,7 +577,7 @@ export class WorkflowRuntime {
           status: "failed",
         });
 
-        if (attempt > this.policy.maxRetriesPerStep) {
+        if (attempt > this.policy.maxRetriesPerStep || !shouldRetryStepError(error)) {
           throw error;
         }
       } finally {
@@ -794,8 +832,12 @@ export class WorkflowRuntime {
       "",
       memoryContext.summary,
       "",
-      "Current artifacts:",
-      JSON.stringify(this.getRunRecord().artifacts),
+      "Current evidence summary:",
+      `- Validation errors: ${workingMemory.validationErrors.slice(-3).map((entry) => entry.message).join(" | ") || "none"}`,
+      `- Tool calls: ${workingMemory.toolCalls.slice(-4).map((call) => `${call.toolName}:${call.suppressed ? "suppressed" : "executed"}`).join(", ") || "none"}`,
+      `- Evidence: ${workingMemory.evidence.join(", ") || "none"}`,
+      `- Command signals: ${workingMemory.commandSignals.join(", ") || "none"}`,
+      `- Patch signals: ${workingMemory.patchSignals.join(", ") || "none"}`,
     ].join("\n");
   }
 
@@ -1361,6 +1403,20 @@ export class WorkflowRuntime {
     }
 
     if (action.type === "tool_call") {
+      if (this.shouldForceConvergedFinalize(action)) {
+        const reason = this.buildConvergenceGuardReason(action);
+        this.recordBlockedAction(action, reason);
+        this.forceFinalAnalysis(reason);
+        state.actionQueue = [
+          {
+            type: "finalize",
+            task: reason,
+            reason,
+          },
+        ];
+        return;
+      }
+
       const toolResult = await this.executeToolAction(action);
       if (!toolResult) {
         if (this.getArtifactsValue<string>("forcedFinalAnalysisReason")) {

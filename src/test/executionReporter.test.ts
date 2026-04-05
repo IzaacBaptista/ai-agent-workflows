@@ -240,6 +240,59 @@ test("RunSummaryFormatter renders an issue-like pure reasoning failure", () => {
   assert.match(output, /Behavior:\npure reasoning \(no tool usage\)/);
 });
 
+test("RunSummaryFormatter explains planner rate-limit failure before investigation begins", () => {
+  const runRecord = createRunRecord({
+    workflowName: "IssueWorkflow",
+    status: "failed",
+    input: "The planner keeps generating redundant search_code steps",
+    error: "Request failed with status code 429",
+    steps: [
+      {
+        stepId: "plan:1:1",
+        name: "plan",
+        status: "failed",
+        attempt: 1,
+        startedAt: "2026-04-05T13:00:00.000Z",
+        completedAt: "2026-04-05T13:00:01.000Z",
+        agentName: "PlannerAgent",
+        inputSummary: "The planner keeps generating redundant search_code steps",
+        error: "Request failed with status code 429",
+        actionType: "plan",
+      },
+      {
+        stepId: "plan:1:2",
+        name: "plan",
+        status: "failed",
+        attempt: 2,
+        startedAt: "2026-04-05T13:00:01.000Z",
+        completedAt: "2026-04-05T13:00:02.000Z",
+        agentName: "PlannerAgent",
+        inputSummary: "The planner keeps generating redundant search_code steps",
+        error: "Request failed with status code 429",
+        actionType: "plan",
+      },
+    ],
+  });
+  const result: WorkflowResult<{ summary: string }> = {
+    success: false,
+    error: "Request failed with status code 429",
+    meta: createMeta({
+      workflowName: "IssueWorkflow",
+      status: "failed",
+      stepCount: 2,
+      critiqueCount: 0,
+      replanCount: 0,
+      toolCallCount: 0,
+    }),
+  };
+
+  const output = RunSummaryFormatter.format({ result, runRecord });
+
+  assert.match(output, /The system failed during planning before investigation began\./);
+  assert.match(output, /Why it failed:\n- The LLM provider rate-limited the request before the workflow could continue\./);
+  assert.match(output, /Behavior:\nplanning interrupted by external dependency/);
+});
+
 test("RunSummaryFormatter treats failed tool attempts as tool-driven investigation", () => {
   const runRecord = createRunRecord({
     workflowName: "IssueWorkflow",

@@ -246,6 +246,10 @@ export function buildNarrativeWhatHappened<T>(
 ): string[] {
   const bullets: string[] = [];
   const meta = result.meta;
+  const hasAnalyzeStep = (runRecord?.steps ?? []).some((step) => step.name === "analyze");
+  const hasOnlyPlanningSteps =
+    (runRecord?.steps ?? []).length > 0 &&
+    (runRecord?.steps ?? []).every((step) => step.name === "plan");
   const attemptedSearch = hasStepAttempt(runRecord, "tool_call", (step) => step.toolName === "search_code");
   const attemptedRead = hasStepAttempt(runRecord, "tool_call", (step) => step.toolName === "read_file");
   const attemptedCommands = hasStepAttempt(runRecord, "tool_call", (step) => step.toolName === "run_command");
@@ -267,7 +271,9 @@ export function buildNarrativeWhatHappened<T>(
   const failureSummary = extractFailureSummary(result, runRecord).toLowerCase();
   const hasToolAttempt = attemptedSearch || attemptedRead || attemptedCommands;
 
-  if (!hasToolAttempt && !usedDelegation && !usedEditPatch) {
+  if (hasOnlyPlanningSteps && !result.success) {
+    bullets.push("The system failed during planning before investigation began.");
+  } else if (!hasToolAttempt && !usedDelegation && !usedEditPatch && hasAnalyzeStep) {
     bullets.push("The system analyzed the issue without using tools.");
   } else if (attemptedSearch && attemptedRead) {
     bullets.push(
@@ -321,6 +327,15 @@ export function humanizeFailureSummary<T>(
   runRecord: WorkflowRunRecord | null,
 ): string {
   const failure = extractFailureSummary(result, runRecord);
+  if (/status code 429|rate limit/i.test(failure)) {
+    const retryAfterMatch = failure.match(/retry after approximately (\d+)s/i);
+    if (retryAfterMatch?.[1]) {
+      return `The LLM provider rate-limited the request before the workflow could continue. Retry after approximately ${retryAfterMatch[1]}s.`;
+    }
+
+    return "The LLM provider rate-limited the request before the workflow could continue.";
+  }
+
   const timedOutMatch = failure.match(/^Step "([^"]+)" timed out$/i);
   if (timedOutMatch?.[1]) {
     return `The ${timedOutMatch[1]} step exceeded the allowed execution time.`;
@@ -337,6 +352,9 @@ export function humanizeFailureSummary<T>(
 export function getBehaviorSignal(meta: WorkflowExecutionMeta, runRecord: WorkflowRunRecord | null): string | undefined {
   const failure = (runRecord?.error ?? "").toLowerCase();
   const forcedReason = String(runRecord?.artifacts.forcedFinalAnalysisReason ?? "").toLowerCase();
+  const hasOnlyPlanningSteps =
+    (runRecord?.steps ?? []).length > 0 &&
+    (runRecord?.steps ?? []).every((step) => step.name === "plan");
   const hasDelegateStep = (runRecord?.steps ?? []).some(
     (step) => step.actionType === "delegate" && !step.suppressed,
   );
@@ -348,6 +366,10 @@ export function getBehaviorSignal(meta: WorkflowExecutionMeta, runRecord: Workfl
   );
   const hasLoopSignal =
     meta.replanCount >= 3 || failure.includes("maxsteps") || forcedReason.includes("no progress");
+
+  if (hasOnlyPlanningSteps && /status code 429|rate limit/i.test(failure)) {
+    return "planning interrupted by external dependency";
+  }
 
   if (meta.editActionCount > 0 || hasEditPatchStep) {
     return "autonomous patch attempt";

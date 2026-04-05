@@ -68,9 +68,11 @@ function defaultLoadEditableFileContexts(
   files: string[],
   baseDir = process.cwd(),
   maxFiles = 3,
-  maxCharsPerFile = 16_000,
+  maxCharsPerFile = 64_000,
+  maxTotalChars = 80_000,
 ): EditableFileContext[] {
   const uniqueFiles = Array.from(new Set(files)).slice(0, maxFiles);
+  let totalChars = 0;
 
   return uniqueFiles.map((file) => {
     const absolutePath = resolveEditablePath(file, baseDir);
@@ -79,6 +81,11 @@ function defaultLoadEditableFileContexts(
 
     if (content.length > maxCharsPerFile) {
       throw new Error(`Editable file "${file}" exceeds the maximum supported size for edit_patch`);
+    }
+
+    totalChars += content.length;
+    if (totalChars > maxTotalChars) {
+      throw new Error("Combined editable context exceeds the maximum supported size for edit_patch");
     }
 
     return {

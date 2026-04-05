@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as llmClient from "../core/llmClient";
+import { LlmProviderError } from "../core/llmClient";
 import {
   RuntimeAction,
   WorkflowCritique,
@@ -15,6 +16,7 @@ import {
 import {
   setCodePatchApplierForTesting,
   setEditableFileContextLoaderForTesting,
+  loadEditableFileContexts,
 } from "../tools/editPatchTool";
 import { setGitToolExecutorForTesting } from "../tools/gitTool";
 import { setIsolatedWorkspaceFactoryForTesting } from "../tools/isolatedWorkspaceTool";
@@ -218,6 +220,44 @@ test("WorkflowRuntime retries failed step once when configured", async () => {
   assert.equal(result, "recovered");
   assert.equal(attemptCount, 2);
   assert.equal(runtime.getRunRecord().steps.length, 2);
+});
+
+test("WorkflowRuntime does not retry a step after callLLM exhausts provider retries", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "ProviderFailureWorkflow",
+    input: "provider failure input",
+    policy: {
+      maxSteps: 5,
+      maxRetriesPerStep: 1,
+      timeoutMs: 1000,
+    },
+  });
+
+  let attemptCount = 0;
+
+  await assert.rejects(
+    () =>
+      runtime.executeStep(
+        "plan",
+        async () => {
+          attemptCount += 1;
+          throw new LlmProviderError(
+            "rate_limit",
+            "LLM provider rate limit reached. Retry after approximately 3s.",
+            { retryAfterMs: 3000 },
+          );
+        },
+        {
+          agentName: "PlannerAgent",
+          inputSummary: "provider-limited planning",
+        },
+      ),
+    /rate limit reached/i,
+  );
+
+  assert.equal(attemptCount, 1);
+  assert.equal(runtime.getRunRecord().steps.length, 1);
+  assert.equal(runtime.getRunRecord().steps[0]?.attempt, 1);
 });
 
 test("WorkflowRuntime fails timed out step and records failure", async () => {
@@ -428,6 +468,77 @@ test("WorkflowRuntime safely replans after a tool execution failure", async () =
   } finally {
     setRunCommandExecutorForTesting();
   }
+});
+
+test("WorkflowRuntime forces finalize instead of another repo inspection when budget is nearly exhausted", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "RuntimeConvergenceWorkflow",
+    input: "convergence input",
+    policy: {
+      maxSteps: 4,
+      maxRetriesPerStep: 0,
+      timeoutMs: 1000,
+    },
+  });
+
+  const definition = createDefinition({
+    workflowName: "RuntimeConvergenceWorkflow",
+    runPlanner: async () => ({
+      summary: "search then maybe read more",
+      actions: [
+        {
+          type: "tool_call",
+          toolName: "search_code",
+          input: { terms: ["WorkflowRuntime"] },
+          reason: "Localize the repository issue first",
+        },
+        {
+          type: "finalize",
+          task: "finish after convergence guard",
+          reason: "This should run after the guard",
+        },
+      ],
+    }),
+    runReplanner: async () => ({
+      summary: "one more read before finalize",
+      actions: [
+        {
+          type: "tool_call",
+          toolName: "read_file",
+          input: { files: ["src/core/workflowRuntime.ts"] },
+          reason: "Try one more repository inspection step",
+        },
+        {
+          type: "finalize",
+          task: "finish after convergence guard",
+          reason: "The remaining step should be finalization",
+        },
+      ],
+    }),
+  });
+
+  const result = await runtime.runActionQueue(definition, "convergence input");
+
+  assert.match(result.note, /Convergence guard forced finalization/i);
+  assert.equal(
+    runtime.getRunRecord().steps.some(
+      (step) =>
+        step.blocked === true &&
+        step.actionType === "tool_call" &&
+        step.toolName === "read_file" &&
+        /Convergence guard forced finalization/i.test(step.outputSummary ?? ""),
+    ),
+    true,
+  );
+});
+
+test("loadEditableFileContexts supports a large central file within the expanded budget", () => {
+  const contexts = loadEditableFileContexts(["src/core/workflowRuntime.ts"]);
+
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0]?.path, "src/core/workflowRuntime.ts");
+  assert.match(contexts[0]?.content ?? "", /export class WorkflowRuntime/);
+  assert.ok((contexts[0]?.content.length ?? 0) > 16_000);
 });
 
 test("WorkflowRuntime applies edit_patch and validates it with run_command", async () => {

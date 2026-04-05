@@ -3,6 +3,11 @@ import {
   CommandExecutionResult,
   GitDiffResult,
   GitStatusResult,
+  RuntimeAction,
+  WorkflowExecutionMeta,
+  WorkflowRunRecord,
+  WorkflowStepRecord,
+  WorkflowValidationError,
 } from "../core/types";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
@@ -170,4 +175,144 @@ export function summarizeUnknownValue(title: string, value: unknown, emptyLabel 
 
   const serialized = typeof value === "string" ? value : JSON.stringify(value);
   return [title, `- ${truncateText(serialized, 240)}`];
+}
+
+function formatRuntimeAction(action: RuntimeAction): string {
+  if (action.type === "tool_call") {
+    return `tool_call(${action.toolName})`;
+  }
+
+  if (action.type === "delegate") {
+    return `delegate(${action.targetAgent})`;
+  }
+
+  return action.type;
+}
+
+function formatStep(step: WorkflowStepRecord): string {
+  const label =
+    step.name === "tool_call" && step.toolName
+      ? `tool_call(${step.toolName})`
+      : step.name === "delegate" && step.targetAgent
+        ? `delegate(${step.targetAgent})`
+        : step.name;
+  const status = step.blocked ? "blocked" : step.status;
+  const detail = step.blocked
+    ? step.outputSummary
+    : step.status === "failed"
+      ? step.error
+      : step.outputSummary;
+
+  return `${label}: ${status}${detail ? ` (${truncateText(detail, 140)})` : ""}`;
+}
+
+export function summarizeRuntimeBudget(
+  run: WorkflowRunRecord,
+  meta: WorkflowExecutionMeta,
+): string[] {
+  const remainingSteps = Math.max(run.policy.maxSteps - run.steps.length, 0);
+  const remainingToolCalls = Math.max(run.policy.maxToolCalls - meta.toolCallCount, 0);
+  const remainingEditActions = Math.max(run.policy.maxEditActionsPerRun - meta.editActionCount, 0);
+  const pressure =
+    remainingSteps <= 1 ? "high" : remainingSteps <= 3 ? "medium" : "normal";
+
+  return [
+    "Execution budget:",
+    `- steps=${run.steps.length}/${run.policy.maxSteps} remaining=${remainingSteps} pressure=${pressure}`,
+    `- toolCalls=${meta.toolCallCount}/${run.policy.maxToolCalls} remaining=${remainingToolCalls}`,
+    `- editActions=${meta.editActionCount}/${run.policy.maxEditActionsPerRun} remaining=${remainingEditActions}`,
+  ];
+}
+
+export function summarizeEvidenceOverview(run: WorkflowRunRecord): string[] {
+  const evidence: string[] = [];
+
+  if (run.artifacts.codeSearchResults) {
+    evidence.push("code_search_results");
+  }
+
+  if (run.artifacts.fileReadResults) {
+    evidence.push("file_read_results");
+  }
+
+  if (run.artifacts.commandResults) {
+    evidence.push("command_results");
+  }
+
+  if (run.artifacts.patchResults) {
+    evidence.push("patch_results");
+  }
+
+  if (run.artifacts.gitStatusResult) {
+    evidence.push("git_status_result");
+  }
+
+  if (run.artifacts.gitDiffResult) {
+    evidence.push("git_diff_result");
+  }
+
+  if (evidence.length === 0) {
+    return ["Evidence on hand:", "- none"];
+  }
+
+  return ["Evidence on hand:", ...evidence.map((item) => `- ${item}`)];
+}
+
+export function summarizeRecentSteps(
+  steps: WorkflowStepRecord[],
+  maxItems = 5,
+): string[] {
+  if (steps.length === 0) {
+    return ["Recent steps:", "- none"];
+  }
+
+  const recentSteps = steps.slice(-maxItems);
+  return [
+    "Recent steps:",
+    ...recentSteps.map((step) => `- ${formatStep(step)}`),
+    ...summarizeOverflow(steps.length - recentSteps.length, "earlier steps"),
+  ];
+}
+
+export function summarizeValidationErrors(
+  errors: WorkflowValidationError[] | undefined,
+  maxItems = 4,
+): string[] {
+  const values = errors ?? [];
+  if (values.length === 0) {
+    return ["Validation errors:", "- none"];
+  }
+
+  return [
+    "Validation errors:",
+    ...values.slice(-maxItems).map((entry) => `- ${truncateText(entry.kind + ": " + entry.message, 180)}`),
+    ...summarizeOverflow(values.length - Math.min(values.length, maxItems), "earlier validation errors"),
+  ];
+}
+
+export function summarizeRemainingActions(actions: RuntimeAction[], maxItems = 5): string[] {
+  if (actions.length === 0) {
+    return ["Remaining actions:", "- none"];
+  }
+
+  return [
+    "Remaining actions:",
+    ...actions.slice(0, maxItems).map((action) => {
+      if (action.type === "tool_call") {
+        return `- ${formatRuntimeAction(action)}: ${truncateText(action.reason, 120)}`;
+      }
+
+      if ("task" in action) {
+        return `- ${formatRuntimeAction(action)}: ${truncateText(action.task, 120)}`;
+      }
+
+      return `- ${formatRuntimeAction(action)}: ${truncateText(action.reason, 120)}`;
+    }),
+    ...summarizeOverflow(actions.length - maxItems, "queued actions"),
+  ];
+}
+
+export function summarizeCompletedAction(action: unknown): string[] {
+  const serialized = typeof action === "string" ? action : JSON.stringify(action);
+  return ["Completed action:", `- ${truncateText(serialized, 220)}`];
 }

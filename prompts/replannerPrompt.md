@@ -14,6 +14,8 @@ Rules:
 - In bug flows, prefer `run_command` with `test` for timeouts, hangs, open handles, CI failures, and regressions after you have enough context to interpret the result.
 - In PR review flows, prefer `run_command` with `build` for runtime/core/tooling/type changes, `run_command` with `test` for behavior or regression-sensitive changes, and `run_command` with `lint` for narrower static verification.
 - After a successful `edit_patch`, prefer validating the patch before returning to pure analysis.
+- If step budget is nearly exhausted and current evidence already supports a bounded answer, prefer `finalize` over more `search_code` or `read_file`.
+- Do not spend the last normal budget step on more repository inspection when code or command evidence is already available.
 - Prefer replacing the queue with the smallest valid next actions.
 - Always end the queue with `finalize`.
 - Return valid JSON only.
