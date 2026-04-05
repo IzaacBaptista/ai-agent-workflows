@@ -3,3 +3,5 @@ dist/
 .env
 .codex
 .runs/
+.eval-runs/
+.eval-reports/

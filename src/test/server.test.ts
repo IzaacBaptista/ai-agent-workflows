@@ -99,9 +99,18 @@ test("POST /issue/analyze returns workflow result with meta", async () => {
   const responses = [
     buildLlmResponse({
       summary: "Issue workflow plan",
-      steps: [
-        { action: "triage", purpose: "triage first" },
-        { action: "final_analysis", purpose: "finish" },
+      actions: [
+        {
+          type: "analyze",
+          stage: "triage",
+          task: "triage first",
+          reason: "Need triage",
+        },
+        {
+          type: "finalize",
+          task: "finish",
+          reason: "Finish after triage",
+        },
       ],
     }),
     buildLlmResponse({
@@ -112,7 +121,13 @@ test("POST /issue/analyze returns workflow result with meta", async () => {
     }),
     buildLlmResponse({
       summary: "Proceed to final",
-      steps: [{ action: "final_analysis", purpose: "enough context" }],
+      actions: [
+        {
+          type: "finalize",
+          task: "enough context",
+          reason: "enough context",
+        },
+      ],
     }),
     buildLlmResponse({
       summary: "Issue result",
@@ -126,8 +141,8 @@ test("POST /issue/analyze returns workflow result with meta", async () => {
     buildLlmResponse({
       approved: true,
       summary: "approved",
-      gaps: [],
-      recommendedActions: [],
+      missingEvidence: [],
+      confidence: "high",
     }),
   ];
 
@@ -166,7 +181,13 @@ test("GET /runs exposes persisted run summaries", async () => {
   const responses = [
     buildLlmResponse({
       summary: "Issue workflow plan",
-      steps: [{ action: "final_analysis", purpose: "finish" }],
+      actions: [
+        {
+          type: "finalize",
+          task: "finish",
+          reason: "finish",
+        },
+      ],
     }),
     buildLlmResponse({
       summary: "Issue result",
@@ -180,8 +201,8 @@ test("GET /runs exposes persisted run summaries", async () => {
     buildLlmResponse({
       approved: true,
       summary: "approved",
-      gaps: [],
-      recommendedActions: [],
+      missingEvidence: [],
+      confidence: "high",
     }),
   ];
 

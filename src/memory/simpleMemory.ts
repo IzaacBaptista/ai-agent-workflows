@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { join, resolve } from "path";
 import {
   WorkflowExecutionPolicy,
@@ -30,7 +39,10 @@ function getRunFilePath(runId: string): string {
 
 function persistRun(run: WorkflowRunRecord): void {
   ensureRunStorageDir();
-  writeFileSync(getRunFilePath(run.runId), JSON.stringify(run, null, 2), "utf-8");
+  const filePath = getRunFilePath(run.runId);
+  const tempPath = `${filePath}.tmp`;
+  writeFileSync(tempPath, JSON.stringify(run, null, 2), "utf-8");
+  renameSync(tempPath, filePath);
   enforcePersistedRunRetention();
 }
 
@@ -45,12 +57,18 @@ function enforcePersistedRunRetention(): void {
     .filter((fileName) => fileName.endsWith(".json"))
     .map((fileName) => {
       const fullPath = join(runStorageDir, fileName);
-      return {
-        fileName,
-        fullPath,
-        mtimeMs: statSync(fullPath).mtimeMs,
-      };
+
+      try {
+        return {
+          fileName,
+          fullPath,
+          mtimeMs: statSync(fullPath).mtimeMs,
+        };
+      } catch {
+        return undefined;
+      }
     })
+    .filter((entry): entry is { fileName: string; fullPath: string; mtimeMs: number } => Boolean(entry))
     .sort((left, right) => right.mtimeMs - left.mtimeMs);
 
   const staleFiles = persistedFiles.slice(env.MAX_PERSISTED_RUNS);
@@ -164,6 +182,27 @@ export function getRunMemory(runId: string): WorkflowRunRecord {
 
 export function getAllRunMemories(): WorkflowRunRecord[] {
   return Array.from(runStore.values());
+}
+
+export function resetRunMemories(options: { clearPersistedRuns?: boolean } = {}): void {
+  store.clear();
+  runStore.clear();
+
+  if (options.clearPersistedRuns) {
+    ensureRunStorageDir();
+
+    for (const fileName of readdirSync(runStorageDir)) {
+      if (!fileName.endsWith(".json") && !fileName.endsWith(".tmp")) {
+        continue;
+      }
+
+      rmSync(join(runStorageDir, fileName), { force: true });
+    }
+
+    return;
+  }
+
+  loadPersistedRuns();
 }
 
 loadPersistedRuns();

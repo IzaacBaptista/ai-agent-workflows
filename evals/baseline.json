@@ -1,0 +1,133 @@
+{
+  "generatedAt": "2026-04-05T12:50:19.188Z",
+  "sourceReportGeneratedAt": "2026-04-05T12:50:17.933Z",
+  "scenarioCount": 12,
+  "scenarios": [
+    {
+      "id": "bug-prefers-run-command-test",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "planner saw run_command guidance",
+        "exactly one command tool call was executed",
+        "test command result was persisted",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "bug-applies-edit-patch-and-validates",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "planner emitted edit_patch guidance",
+        "patch was applied and counted",
+        "patch triggered automatic validation",
+        "patch ran in isolated worktree and produced stable outcome",
+        "final context includes applied patch evidence",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "bug-rejects-regressive-patch",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "patch regression was recorded",
+        "critic saw regression evidence in its prompt",
+        "critic redirect executed before approval",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "pr-prefers-run-command-build",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "planner saw build-oriented PR guidance",
+        "build command was executed once",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "pr-prefers-run-command-lint",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "planner saw lint-oriented PR guidance",
+        "lint command was executed once",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "pr-uses-git-context-tools",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "git tools were executed",
+        "final context includes git status and git diff evidence",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "pr-uses-staged-git-diff",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "prompt included git diff guidance",
+        "staged git diff was persisted and surfaced",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "duplicate-tool-call-is-suppressed",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "only one real command execution occurred",
+        "duplicate command call was suppressed and cached",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "issue-empty-search-forces-finalization",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "empty search triggered forced finalization without replanning",
+        "empty search result was persisted",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "critic-redirects-to-run-command",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "critic redirect was recorded",
+        "critic redirect led to an executable command",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "planner-invalid-tool-fails-fast",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow fails safely",
+        "no tool calls were executed",
+        "planner validation error was recorded once",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "memory-influences-planner",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "planner prompt included relevant memory and command patterns",
+        "memory hits were recorded in metadata",
+        "planner avoided re-running build immediately",
+        "all mocked LLM responses were consumed"
+      ]
+    }
+  ]
+}

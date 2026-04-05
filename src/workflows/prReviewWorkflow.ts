@@ -1,22 +1,20 @@
 import { CriticAgent } from "../agents/criticAgent";
 import { PlannerAgent } from "../agents/plannerAgent";
-import { ReplannerAgent } from "../agents/replannerAgent";
 import { PRAgent } from "../agents/prAgent";
 import { PRTriageAgent } from "../agents/prTriageAgent";
+import { ReplannerAgent } from "../agents/replannerAgent";
 import {
+  AppliedCodePatchResult,
+  CommandExecutionResult,
+  GitDiffResult,
+  GitStatusResult,
   PRReview,
   PRTriage,
-  WorkflowCritique,
-  WorkflowPlan,
-  WorkflowPlanStep,
-  WorkflowReplan,
   WorkflowResult,
-  WorkflowToolResult,
 } from "../core/types";
-import { WorkflowRuntime } from "../core/workflowRuntime";
+import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
-import { executeWorkflowTool } from "../tools/toolExecutor";
 import {
   logAgentExecutionFailure,
   logAgentExecutionSuccess,
@@ -28,6 +26,10 @@ function buildPRWorkflowContext(
   triage: PRTriage | undefined,
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
+  patchResults: AppliedCodePatchResult[] | undefined,
+  commandResults: CommandExecutionResult[] | undefined,
+  gitStatusResult: GitStatusResult | undefined,
+  gitDiffResult: GitDiffResult | undefined,
 ): string {
   return [
     "Pull request input:",
@@ -58,13 +60,48 @@ function buildPRWorkflowContext(
     "",
     "Read file results:",
     ...(fileReadResults ?? []).map((file) => `- ${file.file}: ${file.content.replace(/\n/g, " ").trim()}`),
+    "",
+    "Applied patches:",
+    ...(patchResults ?? []).flatMap((result) => [
+      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""} outcome=${result.validationOutcome} unexpectedChangedFiles=${result.unexpectedChangedFiles.length} cleanup=${result.worktreeCleanedUp === false ? "failed" : "ok"}`,
+      ...result.edits.map((edit) => `  - ${edit.changeType} ${edit.path} bytes=${edit.bytesWritten}`),
+      ...(result.gitDiff
+        ? [
+            `  - gitDiff files=${result.gitDiff.changedFiles.length} truncated=${result.gitDiff.truncated}`,
+            ...result.gitDiff.changedFiles.map((file) => `    - ${file}`),
+          ]
+        : []),
+    ]),
+    "",
+    "Command results:",
+    ...(commandResults ?? []).map(
+      (result) =>
+        `- ${result.command}: exitCode=${result.exitCode ?? "null"} timedOut=${result.timedOut} stdout=${result.stdout.replace(/\n/g, " ").trim()} stderr=${result.stderr.replace(/\n/g, " ").trim()}`,
+    ),
+    "",
+    "Git status:",
+    ...(gitStatusResult
+      ? gitStatusResult.entries.length > 0
+        ? gitStatusResult.entries.map(
+            (entry) => `- ${entry.indexStatus}${entry.workingTreeStatus} ${entry.path}`,
+          )
+        : ["- clean working tree"]
+      : ["No git status result"]),
+    "",
+    "Git diff:",
+    ...(gitDiffResult
+      ? [
+          `- staged=${gitDiffResult.staged} files=${gitDiffResult.changedFiles.length} truncated=${gitDiffResult.truncated}`,
+          ...gitDiffResult.changedFiles.map((file) => `  - ${file}`),
+          gitDiffResult.diff.length > 0
+            ? `- diff preview: ${gitDiffResult.diff.replace(/\n/g, " ").trim()}`
+            : "- no diff output",
+        ]
+      : ["No git diff result"]),
   ].join("\n");
 }
 
-function buildPRCritiqueContext(
-  diff: string,
-  workflowContext: string,
-): string {
+function buildPRCritiqueContext(diff: string, workflowContext: string): string {
   return [
     "Original input:",
     diff,
@@ -74,61 +111,93 @@ function buildPRCritiqueContext(
   ].join("\n");
 }
 
-function ensureValidPlan(plan: WorkflowPlan): WorkflowPlan {
-  const finalStep = plan.steps[plan.steps.length - 1];
-
-  if (!finalStep || finalStep.action !== "final_analysis") {
-    throw new Error('Workflow plan must end with "final_analysis"');
-  }
-
-  return plan;
-}
-
-function ensureValidRemainingSteps(steps: WorkflowPlanStep[]): WorkflowPlanStep[] {
-  const finalStep = steps[steps.length - 1];
-
-  if (!finalStep || finalStep.action !== "final_analysis") {
-    throw new Error('Workflow plan must end with "final_analysis"');
-  }
-
-  return steps;
-}
-
 function buildReplanContext(
-  workflowName: string,
   originalInput: string,
-  completedAction: string,
+  completedAction: unknown,
   runtime: WorkflowRuntime,
-  remainingSteps: WorkflowPlanStep[],
+  remainingActions: unknown[],
 ): string {
   const run = runtime.getRunRecord();
 
   return [
-    `Workflow: ${workflowName}`,
     "Original input:",
     originalInput,
     "",
-    `Completed action: ${completedAction}`,
+    "Completed action:",
+    JSON.stringify(completedAction),
+    "",
     "Current artifacts:",
     JSON.stringify(run.artifacts),
     "",
     "Executed steps:",
     JSON.stringify(run.steps),
     "",
-    "Current remaining actions:",
-    JSON.stringify(remainingSteps),
+    "Remaining actions:",
+    JSON.stringify(remainingActions),
   ].join("\n");
 }
 
-function fallbackToFinalAnalysis(runtime: WorkflowRuntime, reason: string): WorkflowPlanStep[] {
-  runtime.forceFinalAnalysis(reason);
-  return [
-    {
-      action: "final_analysis",
-      purpose: `Fallback to final analysis: ${reason}`,
-    },
-  ];
-}
+const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
+  workflowName: "PRReviewWorkflow",
+  triageAgentName: "PRTriageAgent",
+  finalAgentName: "PRAgent",
+  runPlanner: (input, memoryContext, availableTools, delegatableAgents) => {
+    const agent = new PlannerAgent();
+    return agent.runForWorkflow("PRReviewWorkflow", input, memoryContext, availableTools, delegatableAgents);
+  },
+  runReplanner: (context, memoryContext, availableTools, delegatableAgents) => {
+    const agent = new ReplannerAgent();
+    return agent.runForWorkflow("PRReviewWorkflow", context, memoryContext, availableTools, delegatableAgents);
+  },
+  runCritic: (context, candidateResult, workingMemory, memoryContext) => {
+    const critic = new CriticAgent();
+    return critic.review("PRReviewWorkflow", context, candidateResult, workingMemory, memoryContext);
+  },
+  runTriage: async (task, input) => {
+    const agent = new PRTriageAgent();
+    return agent.run([`Task:\n${task}`, "", "Code changes:", input].join("\n"));
+  },
+  runFinal: async (task, context) => {
+    const agent = new PRAgent();
+    return agent.run([`Task:\n${task}`, "", context].join("\n"));
+  },
+  buildFinalContext: (input, runtime, triage) => {
+    const codeSearchResults = runtime.getRunRecord().artifacts.codeSearchResults as
+      | Record<string, CodeSearchResult[]>
+      | undefined;
+    const fileReadResults = runtime.getRunRecord().artifacts.fileReadResults as
+      | FileReadResult[]
+      | undefined;
+    const patchResults = runtime.getRunRecord().artifacts.patchResults as
+      | AppliedCodePatchResult[]
+      | undefined;
+    const commandResults = runtime.getRunRecord().artifacts.commandResults as
+      | CommandExecutionResult[]
+      | undefined;
+    const gitStatusResult = runtime.getRunRecord().artifacts.gitStatusResult as
+      | GitStatusResult
+      | undefined;
+    const gitDiffResult = runtime.getRunRecord().artifacts.gitDiffResult as
+      | GitDiffResult
+      | undefined;
+    return buildPRWorkflowContext(
+      input,
+      triage,
+      codeSearchResults,
+      fileReadResults,
+      patchResults,
+      commandResults,
+      gitStatusResult,
+      gitDiffResult,
+    );
+  },
+  buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
+    buildPRCritiqueContext(input, finalContext),
+  buildReplanContext: (input, completedAction, runtime, remainingActions) =>
+    buildReplanContext(input, completedAction, runtime, remainingActions),
+  summarizeTriage: (triage) => `reviewFocus=${triage.reviewFocus.length}`,
+  summarizeResult: (result) => `impacts=${result.impacts.length}`,
+};
 
 export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<PRReview>> {
   const execution = startAgentExecution("PRReviewWorkflow", diff);
@@ -138,254 +207,7 @@ export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<
   });
 
   try {
-    const plan = ensureValidPlan(await runtime.executeStep(
-      "plan",
-      async () => {
-        const plannerAgent = new PlannerAgent();
-        return plannerAgent.runForWorkflow("PRReviewWorkflow", diff);
-      },
-      {
-        agentName: "PlannerAgent",
-        inputSummary: diff,
-        outputSummary: (value) => `steps=${(value as WorkflowPlan).steps.map((step) => step.action).join(",")}`,
-      },
-    ));
-
-    runtime.savePlan(plan);
-
-    let triage: PRTriage | undefined;
-    let workflowContext = diff;
-    let result: PRReview | undefined;
-    let critiqueRevisionCount = 0;
-    let remainingSteps = [...plan.steps];
-
-    while (remainingSteps.length > 0) {
-      const plannedStep = remainingSteps.shift();
-      if (!plannedStep) {
-        break;
-      }
-
-      if (plannedStep.action === "triage") {
-        triage = await runtime.executeStep(
-          "triage",
-          async () => {
-            const triageAgent = new PRTriageAgent();
-            return triageAgent.run(diff);
-          },
-          {
-            agentName: "PRTriageAgent",
-            inputSummary: plannedStep.purpose,
-            outputSummary: (value) => `reviewFocus=${(value as PRTriage).reviewFocus.length}`,
-          },
-        );
-
-        runtime.saveArtifact("triage", triage);
-        if (remainingSteps.length > 0) {
-          const replan = await runtime.executeStep(
-            "replan",
-            async () => {
-              const replanner = new ReplannerAgent();
-              return replanner.runForWorkflow(
-                "PRReviewWorkflow",
-                buildReplanContext("PRReviewWorkflow", diff, plannedStep.action, runtime, remainingSteps),
-              );
-            },
-            {
-              agentName: "ReplannerAgent",
-              inputSummary: plannedStep.purpose,
-              outputSummary: (value) => `steps=${(value as WorkflowReplan).steps.map((step) => step.action).join(",")}`,
-            },
-          );
-
-          runtime.saveReplan(replan);
-          remainingSteps = ensureValidRemainingSteps(replan.steps);
-        }
-        continue;
-      }
-
-      if (plannedStep.action === "search_code") {
-        if (!triage) {
-          throw new Error('Cannot execute "search_code" before "triage"');
-        }
-        const currentTriage = triage;
-
-        const toolResult = await runtime.executeStep(
-          "search_code",
-          async () => executeWorkflowTool({ tool: "search_code", terms: currentTriage.codeSearchTerms }),
-          {
-            inputSummary: plannedStep.purpose,
-            outputSummary: (value) => (value as WorkflowToolResult).summary,
-          },
-        );
-
-        runtime.saveArtifact("codeSearchResults", toolResult.data);
-        const searchSignature = currentTriage.codeSearchTerms.map((term) => term.trim().toLowerCase()).sort().join("|");
-        const searchMatches = Object.values(
-          toolResult.data as Record<string, CodeSearchResult[]>,
-        ).reduce((count, matches) => count + matches.length, 0);
-        runtime.recordProgress("search_code", searchSignature, searchMatches > 0);
-        if (runtime.shouldForceFinalAnalysis()) {
-          remainingSteps = fallbackToFinalAnalysis(
-            runtime,
-            "Repeated search_code steps produced no new matches",
-          );
-          continue;
-        }
-        if (remainingSteps.length > 0) {
-          const replan = await runtime.executeStep(
-            "replan",
-            async () => {
-              const replanner = new ReplannerAgent();
-              return replanner.runForWorkflow(
-                "PRReviewWorkflow",
-                buildReplanContext("PRReviewWorkflow", diff, plannedStep.action, runtime, remainingSteps),
-              );
-            },
-            {
-              agentName: "ReplannerAgent",
-              inputSummary: plannedStep.purpose,
-              outputSummary: (value) => `steps=${(value as WorkflowReplan).steps.map((step) => step.action).join(",")}`,
-            },
-          );
-
-          runtime.saveReplan(replan);
-          remainingSteps = ensureValidRemainingSteps(replan.steps);
-        }
-        continue;
-      }
-
-      if (plannedStep.action === "read_file") {
-        const codeSearchResults = runtime.getRunRecord().artifacts.codeSearchResults as
-          | Record<string, CodeSearchResult[]>
-          | undefined;
-
-        if (!codeSearchResults) {
-          throw new Error('Cannot execute "read_file" before "search_code"');
-        }
-
-        const files = Object.values(codeSearchResults)
-          .flat()
-          .map((entry) => entry.file)
-          .slice(0, 3);
-
-        const toolResult = await runtime.executeStep(
-          "read_file",
-          async () => executeWorkflowTool({ tool: "read_file", files }),
-          {
-            inputSummary: plannedStep.purpose,
-            outputSummary: (value) => (value as WorkflowToolResult).summary,
-          },
-        );
-
-        runtime.saveArtifact("fileReadResults", toolResult.data);
-        const readSignature = files.slice().sort().join("|");
-        const readFilesCount = (toolResult.data as FileReadResult[]).length;
-        runtime.recordProgress("read_file", readSignature, readFilesCount > 0);
-        if (runtime.shouldForceFinalAnalysis()) {
-          remainingSteps = fallbackToFinalAnalysis(
-            runtime,
-            "Repeated read_file steps inspected the same files without progress",
-          );
-          continue;
-        }
-        if (remainingSteps.length > 0) {
-          const replan = await runtime.executeStep(
-            "replan",
-            async () => {
-              const replanner = new ReplannerAgent();
-              return replanner.runForWorkflow(
-                "PRReviewWorkflow",
-                buildReplanContext("PRReviewWorkflow", diff, plannedStep.action, runtime, remainingSteps),
-              );
-            },
-            {
-              agentName: "ReplannerAgent",
-              inputSummary: plannedStep.purpose,
-              outputSummary: (value) => `steps=${(value as WorkflowReplan).steps.map((step) => step.action).join(",")}`,
-            },
-          );
-
-          runtime.saveReplan(replan);
-          remainingSteps = ensureValidRemainingSteps(replan.steps);
-        }
-        continue;
-      }
-
-      if (plannedStep.action === "call_external_api") {
-        const toolResult = await runtime.executeStep(
-          "call_external_api",
-          async () => executeWorkflowTool({ tool: "call_external_api", endpoint: "pr-regression-check" }),
-          {
-            inputSummary: plannedStep.purpose,
-            outputSummary: (value) => (value as WorkflowToolResult).summary,
-          },
-        );
-
-        runtime.saveArtifact("externalApiResult", toolResult.data);
-        runtime.recordProgress("call_external_api", "pr-regression-check", true);
-        continue;
-      }
-
-      result = await runtime.executeStep(
-        "final_analysis",
-        async () => {
-          const codeSearchResults = runtime.getRunRecord().artifacts.codeSearchResults as
-            | Record<string, CodeSearchResult[]>
-            | undefined;
-          const fileReadResults = runtime.getRunRecord().artifacts.fileReadResults as
-            | FileReadResult[]
-            | undefined;
-          workflowContext = buildPRWorkflowContext(diff, triage, codeSearchResults, fileReadResults);
-          runtime.saveArtifact("context", workflowContext);
-          const agent = new PRAgent();
-          return agent.run(workflowContext);
-        },
-        {
-          agentName: "PRAgent",
-          inputSummary: plannedStep.purpose,
-          outputSummary: (value) => `impacts=${(value as PRReview).impacts.length}`,
-        },
-      );
-
-      const critique = await runtime.executeStep(
-        "critique",
-        async () => {
-          const critic = new CriticAgent();
-          return critic.review("PRReviewWorkflow", buildPRCritiqueContext(diff, workflowContext), result);
-        },
-        {
-          agentName: "CriticAgent",
-          inputSummary: plannedStep.purpose,
-          outputSummary: (value) => `approved=${(value as WorkflowCritique).approved}`,
-        },
-      );
-
-      runtime.saveCritique(critique);
-
-      if (!critique.approved && critiqueRevisionCount < 1) {
-        critiqueRevisionCount += 1;
-        result = undefined;
-        remainingSteps = ensureValidRemainingSteps(
-          critique.recommendedActions.length > 0
-            ? critique.recommendedActions.map((action) => ({
-                action,
-                purpose: `Critic follow-up: ${critique.summary}`,
-              }))
-            : [
-                {
-                  action: "final_analysis",
-                  purpose: `Critic retry: ${critique.summary}`,
-                },
-              ],
-        );
-      }
-    }
-
-    if (!result) {
-      throw new Error('Workflow plan did not produce a "final_analysis" result');
-    }
-
-    runtime.saveArtifact("result", result);
+    const result = await runtime.runActionQueue(prWorkflowDefinition, diff);
     runtime.complete();
     logAgentExecutionSuccess(execution, diff, result);
     return { success: true, data: result, meta: runtime.getMeta() };
