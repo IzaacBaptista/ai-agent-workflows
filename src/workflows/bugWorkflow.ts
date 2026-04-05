@@ -3,7 +3,13 @@ import { BugTriageAgent } from "../agents/bugTriageAgent";
 import { CriticAgent } from "../agents/criticAgent";
 import { PlannerAgent } from "../agents/plannerAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
-import { BugAnalysis, BugTriage, CommandExecutionResult, WorkflowResult } from "../core/types";
+import {
+  AppliedCodePatchResult,
+  BugAnalysis,
+  BugTriage,
+  CommandExecutionResult,
+  WorkflowResult,
+} from "../core/types";
 import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
@@ -19,6 +25,7 @@ function buildBugWorkflowContext(
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
   externalApiResult: unknown,
+  patchResults: AppliedCodePatchResult[] | undefined,
   commandResults: CommandExecutionResult[] | undefined,
 ): string {
   return [
@@ -52,6 +59,12 @@ function buildBugWorkflowContext(
     "",
     "External API result:",
     externalApiResult ? JSON.stringify(externalApiResult) : "No external API result",
+    "",
+    "Applied patches:",
+    ...(patchResults ?? []).flatMap((result) => [
+      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""}`,
+      ...result.edits.map((edit) => `  - ${edit.changeType} ${edit.path} bytes=${edit.bytesWritten}`),
+    ]),
     "",
     "Command results:",
     ...(commandResults ?? []).map(
@@ -129,6 +142,9 @@ const bugWorkflowDefinition: WorkflowDefinition<BugTriage, BugAnalysis> = {
       | FileReadResult[]
       | undefined;
     const externalApiResult = runtime.getRunRecord().artifacts.externalApiResult;
+    const patchResults = runtime.getRunRecord().artifacts.patchResults as
+      | AppliedCodePatchResult[]
+      | undefined;
     const commandResults = runtime.getRunRecord().artifacts.commandResults as
       | CommandExecutionResult[]
       | undefined;
@@ -138,6 +154,7 @@ const bugWorkflowDefinition: WorkflowDefinition<BugTriage, BugAnalysis> = {
       codeSearchResults,
       fileReadResults,
       externalApiResult,
+      patchResults,
       commandResults,
     );
   },

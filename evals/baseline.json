@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-04-05T11:43:00.594Z",
-  "sourceReportGeneratedAt": "2026-04-05T11:42:56.651Z",
-  "scenarioCount": 10,
+  "generatedAt": "2026-04-05T12:19:00.896Z",
+  "sourceReportGeneratedAt": "2026-04-05T12:18:59.610Z",
+  "scenarioCount": 11,
   "scenarios": [
     {
       "id": "bug-prefers-run-command-test",
@@ -11,6 +11,18 @@
         "planner saw run_command guidance",
         "exactly one command tool call was executed",
         "test command result was persisted",
+        "all mocked LLM responses were consumed"
+      ]
+    },
+    {
+      "id": "bug-applies-edit-patch-and-validates",
+      "mustPass": true,
+      "requiredChecks": [
+        "workflow completes successfully",
+        "planner emitted edit_patch guidance",
+        "patch was applied and counted",
+        "patch triggered automatic validation",
+        "final context includes applied patch evidence",
         "all mocked LLM responses were consumed"
       ]
     },

@@ -18,6 +18,12 @@ export const runtimeActionSchema: z.ZodType<RuntimeAction> = z.lazy(() =>
       reason: z.string(),
     }),
     z.object({
+      type: z.literal("edit_patch"),
+      task: z.string(),
+      files: z.array(z.string().trim().min(1)).min(1).max(3),
+      reason: z.string(),
+    }),
+    z.object({
       type: z.literal("tool_call"),
       toolName: z.enum(WORKFLOW_TOOL_NAMES),
       input: z.unknown(),
@@ -69,4 +75,17 @@ export const reviewerAssessmentSchema: z.ZodType<ReviewerAssessment> = z.object(
   summary: z.string(),
   missingEvidence: z.array(z.string()),
   recommendedAction: runtimeActionSchema.optional(),
+});
+
+export const codePatchPlanSchema = z.object({
+  summary: z.string(),
+  edits: z.array(
+    z.object({
+      path: z.string().trim().min(1),
+      changeType: z.enum(["create", "update"]),
+      content: z.string(),
+      reason: z.string(),
+    }),
+  ).max(3),
+  validationCommand: z.enum(["build", "test", "lint"]).optional(),
 });

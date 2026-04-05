@@ -1,4 +1,5 @@
 import { getDelegatableAgentNames, isRegisteredAgentName, runDelegatedAgent } from "../agents/agentRegistry";
+import { CoderAgent } from "../agents/coderAgent";
 import { buildRelevantMemoryContext } from "../memory/runMemoryStore";
 import {
   buildWorkingMemory,
@@ -6,6 +7,10 @@ import {
   getWorkingMemorySignature,
   summarizeWorkingMemory,
 } from "../memory/workingMemory";
+import {
+  applyCodePatchPlan,
+  loadEditableFileContexts,
+} from "../tools/editPatchTool";
 import {
   appendRunStep,
   completeRun,
@@ -24,6 +29,9 @@ import {
   validateWorkflowToolInput,
 } from "../tools/toolExecutor";
 import {
+  AppliedCodePatchResult,
+  CodePatchPlan,
+  EditableFileContext,
   RegisteredAgentName,
   RelevantMemoryContext,
   ReviewerAssessment,
@@ -70,6 +78,7 @@ interface RuntimeProgressState {
 
 interface RuntimeStats {
   toolCallCount: number;
+  editActionCount: number;
   delegationCount: number;
   maxDelegationDepthReached: number;
   memoryHits: number;
@@ -132,6 +141,8 @@ const DEFAULT_POLICY: WorkflowExecutionPolicy = {
   maxConsecutiveNoProgress: 1,
   maxToolCalls: 4,
   maxRepeatedIdenticalToolCalls: 1,
+  maxEditActionsPerRun: 2,
+  maxFilesPerEditAction: 3,
   maxDelegationsPerRun: 2,
   maxDelegationDepth: 1,
   maxCriticRedirects: 2,
@@ -201,12 +212,14 @@ export class WorkflowRuntime {
 
     this.saveArtifact("runtimeStats", {
       toolCallCount: 0,
+      editActionCount: 0,
       delegationCount: 0,
       maxDelegationDepthReached: 0,
       memoryHits: 0,
       criticRedirectCount: 0,
     } satisfies RuntimeStats);
     this.saveArtifact("toolCalls", []);
+    this.saveArtifact("patchResults", []);
     this.saveArtifact("delegations", []);
     this.saveArtifact("validationErrors", []);
     this.saveArtifact("criticRedirects", []);
@@ -281,6 +294,7 @@ export class WorkflowRuntime {
       critiqueCount: critiques.length,
       replanCount: replans.length,
       toolCallCount: stats.toolCallCount,
+      editActionCount: stats.editActionCount,
       delegationCount: stats.delegationCount,
       maxDelegationDepthReached: stats.maxDelegationDepthReached,
       memoryHits: stats.memoryHits,
@@ -301,6 +315,7 @@ export class WorkflowRuntime {
     return (
       this.getArtifactsValue<RuntimeStats>("runtimeStats") ?? {
         toolCallCount: 0,
+        editActionCount: 0,
         delegationCount: 0,
         maxDelegationDepthReached: 0,
         memoryHits: 0,
@@ -604,6 +619,145 @@ export class WorkflowRuntime {
 
     this.recordProgress(`tool_call:${toolName}`, signature, getToolProgress(result));
     return result;
+  }
+
+  private buildEditPatchSignature(action: { task: string; files: string[] }, workingMemorySignature: string): string {
+    const normalizedFiles = [...action.files]
+      .map((file) => file.trim().toLowerCase())
+      .sort()
+      .join("|");
+
+    return `edit_patch:${action.task.trim().toLowerCase()}:${normalizedFiles}:${workingMemorySignature}`;
+  }
+
+  private buildCoderPrompt(
+    input: string,
+    action: Extract<RuntimeAction, { type: "edit_patch" }>,
+    workingMemory: WorkingMemorySnapshot,
+    memoryContext: RelevantMemoryContext,
+    editableFiles: EditableFileContext[],
+  ): string {
+    return [
+      `Workflow: ${this.workflowName}`,
+      "",
+      "Original input:",
+      input,
+      "",
+      "Patch task:",
+      action.task,
+      "",
+      "Patch reason:",
+      action.reason,
+      "",
+      "Editable files:",
+      ...editableFiles.map((file) => [
+        `Path: ${file.path}`,
+        `Exists: ${file.exists ? "yes" : "no"}`,
+        "Content:",
+        file.content || "",
+      ].join("\n")),
+      "",
+      "Working memory:",
+      summarizeWorkingMemory(workingMemory),
+      "",
+      memoryContext.summary,
+      "",
+      "Current artifacts:",
+      JSON.stringify(this.getRunRecord().artifacts),
+    ].join("\n");
+  }
+
+  private async executeEditPatchAction(
+    action: RuntimeAction,
+    input: string,
+  ): Promise<AppliedCodePatchResult | undefined> {
+    if (action.type !== "edit_patch") {
+      return undefined;
+    }
+
+    if (action.files.length > this.policy.maxFilesPerEditAction) {
+      const duplicate = this.recordValidationError(
+        "edit_patch",
+        `edit_patch requested too many files (${action.files.length})`,
+        `edit_patch:files:${action.files.join("|")}`,
+      );
+      if (duplicate) {
+        throw new Error("edit_patch requested too many files");
+      }
+      return undefined;
+    }
+
+    const stats = this.getStats();
+    if (stats.editActionCount >= this.policy.maxEditActionsPerRun) {
+      this.forceFinalAnalysis("Edit patch budget exceeded");
+      return undefined;
+    }
+
+    const workingMemory = this.getWorkingMemory();
+    const workingMemorySignature = getWorkingMemorySignature(workingMemory);
+    const signature = this.buildEditPatchSignature(action, workingMemorySignature);
+    const editableFiles = loadEditableFileContexts(action.files);
+    const memoryContext = this.buildMemoryContext(
+      `${input}\n${action.task}\n${action.files.join("\n")}`,
+      "edit_patch",
+    );
+
+    const patchPlan = await this.executeStep(
+      "edit_patch",
+      async () => {
+        const coder = new CoderAgent();
+
+        try {
+          return await coder.run(
+            this.buildCoderPrompt(input, action, workingMemory, memoryContext, editableFiles),
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.recordValidationError("edit_patch", message, signature);
+          throw error;
+        }
+      },
+      {
+        agentName: "CoderAgent",
+        inputSummary: action.task,
+        outputSummary: (value) =>
+          `edits=${(value as CodePatchPlan).edits.length},validation=${(value as CodePatchPlan).validationCommand ?? "none"}`,
+        actionType: "edit_patch",
+        signature,
+      },
+    );
+
+    let appliedPatch: AppliedCodePatchResult;
+    try {
+      appliedPatch = applyCodePatchPlan(patchPlan, action.files);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const duplicate = this.recordValidationError("edit_patch", message, signature);
+      if (duplicate) {
+        throw error instanceof Error ? error : new Error(message);
+      }
+      return undefined;
+    }
+    this.updateStats((current) => ({
+      ...current,
+      editActionCount: current.editActionCount + 1,
+    }));
+    this.appendArtifactArray("patchResults", appliedPatch);
+    this.saveArtifact("latestPatchPlan", patchPlan);
+    this.recordProgress("edit_patch", signature, appliedPatch.edits.length > 0);
+
+    if (appliedPatch.validationCommand) {
+      await this.executeToolAction({
+        type: "tool_call",
+        toolName: "run_command",
+        input: {
+          command: appliedPatch.validationCommand,
+        },
+        reason: `Validate applied patch for "${action.task}"`,
+      });
+    }
+
+    return appliedPatch;
   }
 
   private async executeDelegationAction(action: RuntimeAction, input: string, depth: number): Promise<unknown> {
@@ -910,6 +1064,52 @@ export class WorkflowRuntime {
             type: "finalize",
             task: `Forced final analysis after tool_call "${action.toolName}"`,
             reason: `No progress after tool_call "${action.toolName}"`,
+          },
+        ];
+        return;
+      }
+
+      const nextActions = await this.runReplan(definition, input, action, state.actionQueue);
+      state.actionQueue = nextActions;
+      return;
+    }
+
+    if (action.type === "edit_patch") {
+      const patchResult = await this.executeEditPatchAction(action, input);
+      if (!patchResult) {
+        if (this.getArtifactsValue<string>("forcedFinalAnalysisReason")) {
+          state.actionQueue = [
+            {
+              type: "finalize",
+              task: this.getArtifactsValue<string>("forcedFinalAnalysisReason") ?? "forced finalization",
+              reason: this.getArtifactsValue<string>("forcedFinalAnalysisReason") ?? "forced finalization",
+            },
+          ];
+          return;
+        }
+
+        state.actionQueue = [{ type: "replan", reason: `Recover from edit_patch "${action.task}"` }];
+        return;
+      }
+
+      if (this.getArtifactsValue<string>("forcedFinalAnalysisReason")) {
+        state.actionQueue = [
+          {
+            type: "finalize",
+            task: this.getArtifactsValue<string>("forcedFinalAnalysisReason") ?? "forced finalization",
+            reason: this.getArtifactsValue<string>("forcedFinalAnalysisReason") ?? "forced finalization",
+          },
+        ];
+        return;
+      }
+
+      if (this.shouldForceFinalAnalysis()) {
+        this.forceFinalAnalysis(`No progress after edit_patch "${action.task}"`);
+        state.actionQueue = [
+          {
+            type: "finalize",
+            task: `Forced final analysis after edit_patch "${action.task}"`,
+            reason: `No progress after edit_patch "${action.task}"`,
           },
         ];
         return;

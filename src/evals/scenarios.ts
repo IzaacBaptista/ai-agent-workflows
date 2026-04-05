@@ -6,6 +6,10 @@ import {
   WorkflowRunRecord,
   WorkflowToolCallRecord,
 } from "../core/types";
+import {
+  setCodePatchApplierForTesting,
+  setEditableFileContextLoaderForTesting,
+} from "../tools/editPatchTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 import { setGitToolExecutorForTesting } from "../tools/gitTool";
 
@@ -149,6 +153,132 @@ export function getEvalScenarios(): EvalScenario[] {
             label: "test command result was persisted",
             passed: commandResults.length === 1 && commandResults[0]?.command === "test",
             details: `commandResults=${commandResults.length}`,
+          },
+        ];
+      },
+    },
+    {
+      id: "bug-applies-edit-patch-and-validates",
+      description: "Bug workflow can apply a localized edit_patch and validate it with run_command before finalizing.",
+      workflow: "bug",
+      input: "Fix WorkflowRuntime timeout cleanup in this repository",
+      setup: () => {
+        setEditableFileContextLoaderForTesting(() => [
+          {
+            path: "/repo/src/core/workflowRuntime.ts",
+            exists: true,
+            content: "export const workflowRuntimePatched = false;\n",
+          },
+        ]);
+        setCodePatchApplierForTesting((plan) => ({
+          summary: plan.summary,
+          edits: [
+            {
+              path: "/repo/src/core/workflowRuntime.ts",
+              changeType: "update",
+              bytesWritten: 44,
+            },
+          ],
+          validationCommand: plan.validationCommand,
+        }));
+        setRunCommandExecutorForTesting(async (command) => ({
+          command,
+          exitCode: 0,
+          stdout: "1 passing test",
+          stderr: "",
+          timedOut: false,
+          durationMs: 21,
+          signal: null,
+        }));
+      },
+      mockResponses: [
+        buildLlmResponse({
+          summary: "Patch the localized bug first",
+          actions: [
+            {
+              type: "edit_patch",
+              task: "Fix the timeout cleanup in WorkflowRuntime and apply the smallest localized code change",
+              files: ["src/core/workflowRuntime.ts"],
+              reason: "The evidence is already concrete enough for a direct fix",
+            },
+            {
+              type: "finalize",
+              task: "Summarize the fix and validation evidence",
+              reason: "Finalize after patching and validation",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "Apply the timeout cleanup fix",
+          edits: [
+            {
+              path: "src/core/workflowRuntime.ts",
+              changeType: "update",
+              content: "export const workflowRuntimePatched = true;\n",
+              reason: "Apply the localized timeout cleanup fix",
+            },
+          ],
+          validationCommand: "test",
+        }),
+        buildLlmResponse({
+          summary: "Finalize after patch validation",
+          actions: [
+            {
+              type: "finalize",
+              task: "Summarize the fix and validation evidence",
+              reason: "The patch has already been validated",
+            },
+          ],
+        }),
+        buildLlmResponse({
+          summary: "Patched bug diagnosis",
+          possibleCauses: ["timeout cleanup was incomplete before the patch"],
+          investigationSteps: ["inspect the applied patch and validation output"],
+          fixSuggestions: ["keep the regression covered with a test"],
+          risks: ["future timer changes could reintroduce the bug"],
+        }),
+        buildLlmResponse({
+          approved: true,
+          summary: "Patch and validation are sufficient",
+          missingEvidence: [],
+          confidence: "high",
+        }),
+      ],
+      evaluate: (result, run, context) => {
+        const patchResults = Array.isArray(run.artifacts.patchResults)
+          ? (run.artifacts.patchResults as Array<{ edits: unknown[]; validationCommand?: string }>)
+          : [];
+        const commandResults = getCommandResults(run);
+        const finalContext = typeof run.artifacts.context === "string" ? run.artifacts.context : "";
+
+        return [
+          {
+            label: "workflow completes successfully",
+            passed: result.success,
+            details: result.success ? result.meta.runId : result.error,
+          },
+          {
+            label: "planner emitted edit_patch guidance",
+            passed:
+              promptIncludes(context, "Use `edit_patch` only when a concrete repository-local fix is needed") &&
+              promptIncludes(context, "Available runtime actions: analyze, edit_patch, tool_call, delegate, finalize"),
+          },
+          {
+            label: "patch was applied and counted",
+            passed: result.meta.editActionCount === 1 && patchResults.length === 1,
+            details: `editActionCount=${result.meta.editActionCount}`,
+          },
+          {
+            label: "patch triggered automatic validation",
+            passed:
+              result.meta.toolCallCount === 1 &&
+              patchResults[0]?.validationCommand === "test" &&
+              commandResults[0]?.command === "test",
+            details: `toolCallCount=${result.meta.toolCallCount}`,
+          },
+          {
+            label: "final context includes applied patch evidence",
+            passed: finalContext.includes("Applied patches:") && finalContext.includes("validate with test"),
           },
         ];
       },

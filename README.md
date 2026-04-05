@@ -77,9 +77,18 @@ EXTERNAL_API_TIMEOUT_MS=5000
 ### Command execution tool
 
 - `run_command` is an allowlisted workflow tool for local verification steps.
+- `edit_patch` is a first-class runtime action for controlled code edits through `CoderAgent`.
 - Supported commands are currently `build`, `test`, and `lint`.
 - In this repository, `lint` runs `tsc --noEmit`, so it acts as a fast static typecheck rather than a style linter.
 - The runtime captures exit code, timeout status, duration, and truncated stdout/stderr, then stores them in run artifacts for replanning and final analysis.
+
+### Controlled patch execution
+
+- `edit_patch` is used only for localized repository changes with explicit target files.
+- `CoderAgent` produces structured patch plans with full replacement file contents for the selected files.
+- Patch application is scope-limited to approved project paths such as `src/`, `prompts/`, `docs/`, `evals/`, `scripts/`, and a few root config/docs files.
+- After a patch is applied, the runtime can automatically run the narrowest validation command suggested by the patch (`lint`, `build`, or `test`).
+- Patch results are stored in run artifacts and fed back into working memory, replanning, critique, and final analysis.
 
 ### Git context tools
 
@@ -175,6 +184,8 @@ All three workflows follow the same execution pattern:
    carries prior command outcomes like `build_failed`, `build_passed`, and `test_timed_out` into relevant memory so repeated command loops are avoided when the state has not materially changed.
 11. Git-aware PR context
    allows the runtime to inspect `git_status` and `git_diff` so PR review can use the real local change set and modified hunks as evidence.
+12. Controlled autonomous patching
+   allows the model to request `edit_patch`, apply a localized code change through `CoderAgent`, validate it automatically, and carry the resulting patch evidence forward into replanning and critique.
 
 ## Project structure
 
@@ -182,7 +193,7 @@ All three workflows follow the same execution pattern:
 src/
 ├── index.ts              # CLI entrypoint
 ├── server.ts             # Express API entrypoint and run inspection endpoints
-├── agents/               # Planner, replanner, critic, reviewer, triage/final agents, and agent registry
+├── agents/               # Planner, replanner, critic, reviewer, coder, triage/final agents, and agent registry
 ├── core/                 # BaseAgent, action schemas, LLM client, workflow runtime, and shared types
 ├── config/               # Environment variable loading
 ├── evals/                # Eval runner, baseline comparison helpers, and scenario definitions
@@ -191,7 +202,7 @@ src/
 │   └── github/           # postPRComment (GitHub REST API write operations)
 ├── memory/               # Persisted run store, working memory snapshots, and relevant-memory retrieval
 ├── test/                 # Runtime, workflow, tool, parser, and HTTP-layer tests
-├── tools/                # Structured logging, repository tools, allowlisted command execution, and tool registry/executor
+├── tools/                # Structured logging, repository tools, controlled patch application, allowlisted command execution, and tool registry/executor
 └── workflows/            # Runtime-driven workflow definitions for issue, bug, and PR review
 evals/                    # Committed eval baseline used by the regression gate
 scripts/                  # Local CI helpers such as the eval-aware gate script
@@ -485,6 +496,7 @@ The eval gate works in two layers:
 The eval harness uses isolated `.eval-runs` storage and checks scenario-level behavior such as:
 
 - preferring `run_command(test)` in bug investigation
+- applying a localized `edit_patch` and validating it automatically in a bug workflow
 - choosing between `lint`, `build`, and `test` based on workflow context
 - using `git_status` and `git_diff` in PR review
 - using staged Git diff context when that is the relevant review surface
@@ -498,7 +510,7 @@ The current suite covers:
 
 - resilient parsing of OpenAI Responses output in `BaseAgent`
 - workflow runtime retries, timeouts, and execution metadata
-- tool execution for `search_code`, `read_file`, `call_external_api`, `run_command`, `git_status`, and `git_diff`
+- tool and patch execution for `search_code`, `read_file`, `call_external_api`, `run_command`, `git_status`, `git_diff`, and controlled `edit_patch`
 - workflow orchestration, critique-driven revision, and failure paths
 - HTTP endpoints and response envelopes through `createApp()`
 

@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as llmClient from "../core/llmClient";
 import { WorkflowRuntime } from "../core/workflowRuntime";
+import { getRunMemory } from "../memory/simpleMemory";
+import {
+  setCodePatchApplierForTesting,
+  setEditableFileContextLoaderForTesting,
+} from "../tools/editPatchTool";
 import { setGitToolExecutorForTesting } from "../tools/gitTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 import { runBugWorkflow } from "../workflows/bugWorkflow";
@@ -262,6 +267,124 @@ test("runBugWorkflow planner guidance prefers run_command test for runtime test 
   } finally {
     setRunCommandExecutorForTesting();
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+  }
+});
+
+test("runBugWorkflow can apply edit_patch and validate it automatically", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  const responses = [
+    buildLlmResponse({
+      summary: "Apply the localized fix",
+      actions: [
+        {
+          type: "edit_patch",
+          task: "Fix the timeout cleanup in WorkflowRuntime and add the smallest supporting code change",
+          files: ["src/core/workflowRuntime.ts"],
+          reason: "The bug is localized enough for a direct patch",
+        },
+        {
+          type: "finalize",
+          task: "Summarize the applied fix and validation evidence",
+          reason: "Finalize after patching and validation",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Patch timeout cleanup",
+      edits: [
+        {
+          path: "src/core/workflowRuntime.ts",
+          changeType: "update",
+          content: "export const workflowRuntimePatched = true;\n",
+          reason: "Apply the localized timeout cleanup fix",
+        },
+      ],
+      validationCommand: "test",
+    }),
+    buildLlmResponse({
+      summary: "Finalize after patch validation",
+      actions: [
+        {
+          type: "finalize",
+          task: "Summarize the applied fix and validation evidence",
+          reason: "The patch and validation already completed",
+        },
+      ],
+    }),
+    buildLlmResponse({
+      summary: "Patched bug result",
+      possibleCauses: ["timeout handle cleanup was incomplete"],
+      investigationSteps: ["inspect patch and test evidence"],
+      fixSuggestions: ["keep the runtime cleanup regression covered by tests"],
+      risks: ["future timer changes may regress cleanup behavior"],
+    }),
+    buildLlmResponse({
+      approved: true,
+      summary: "Patch plus validation is sufficient",
+      missingEvidence: [],
+      confidence: "high",
+    }),
+  ];
+
+  setEditableFileContextLoaderForTesting(() => [
+    {
+      path: "/repo/src/core/workflowRuntime.ts",
+      exists: true,
+      content: "export const workflowRuntimePatched = false;\n",
+    },
+  ]);
+  setCodePatchApplierForTesting((plan) => ({
+    summary: plan.summary,
+    edits: [
+      {
+        path: "/repo/src/core/workflowRuntime.ts",
+        changeType: "update",
+        bytesWritten: 44,
+      },
+    ],
+    validationCommand: plan.validationCommand,
+  }));
+  setRunCommandExecutorForTesting(async (command) => ({
+    command,
+    exitCode: 0,
+    stdout: "1 passing test",
+    stderr: "",
+    timedOut: false,
+    durationMs: 21,
+    signal: null,
+  }));
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const result = await runBugWorkflow("Fix WorkflowRuntime timeout cleanup in this repository");
+
+    assert.equal(result.success, true);
+    if (!result.success) {
+      return;
+    }
+
+    assert.equal(result.data.summary, "Patched bug result");
+    assert.equal(result.meta.editActionCount, 1);
+    assert.equal(result.meta.toolCallCount, 1);
+    const run = getRunMemory(result.meta.runId);
+    assert.equal(Array.isArray(run.artifacts.patchResults), true);
+    assert.equal((run.artifacts.patchResults as unknown[]).length, 1);
+    assert.equal(Array.isArray(run.artifacts.commandResults), true);
+    assert.equal((run.artifacts.commandResults as unknown[]).length, 1);
+    assert.match(String(run.artifacts.context ?? ""), /Applied patches:/);
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+    setEditableFileContextLoaderForTesting();
+    setCodePatchApplierForTesting();
+    setRunCommandExecutorForTesting();
   }
 });
 

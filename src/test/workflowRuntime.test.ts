@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as llmClient from "../core/llmClient";
 import {
   RuntimeAction,
   WorkflowCritique,
@@ -11,6 +12,10 @@ import {
   WorkflowExecutionState,
   WorkflowRuntime,
 } from "../core/workflowRuntime";
+import {
+  setCodePatchApplierForTesting,
+  setEditableFileContextLoaderForTesting,
+} from "../tools/editPatchTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 
 interface TestTriage {
@@ -20,6 +25,12 @@ interface TestTriage {
 interface TestResult {
   done: boolean;
   note: string;
+}
+
+function buildLlmResponse(payload: Record<string, unknown>): { output_text: string } {
+  return {
+    output_text: JSON.stringify(payload),
+  };
 }
 
 function createDefinition(overrides: Partial<WorkflowDefinition<TestTriage, TestResult>> = {}) {
@@ -238,6 +249,121 @@ test("WorkflowRuntime safely replans after an invalid tool request", async () =>
     true,
   );
   assert.equal((runtime.getRunRecord().artifacts.validationErrors as unknown[]).length, 1);
+});
+
+test("WorkflowRuntime applies edit_patch and validates it with run_command", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "RuntimeEditPatchWorkflow",
+    input: "Fix the timeout cleanup bug",
+    policy: {
+      maxSteps: 8,
+      maxRetriesPerStep: 0,
+      timeoutMs: 1000,
+    },
+  });
+
+  const originalCallLlm = llmClient.callLLM;
+  const responses = [
+    buildLlmResponse({
+      summary: "Apply the localized fix",
+      edits: [
+        {
+          path: "src/core/workflowRuntime.ts",
+          changeType: "update",
+          content: "export const fixed = true;\n",
+          reason: "Patch the timeout cleanup logic",
+        },
+      ],
+      validationCommand: "test",
+    }),
+  ];
+
+  setEditableFileContextLoaderForTesting(() => [
+    {
+      path: "/repo/src/core/workflowRuntime.ts",
+      exists: true,
+      content: "export const fixed = false;\n",
+    },
+  ]);
+  setCodePatchApplierForTesting((plan) => ({
+    summary: plan.summary,
+    edits: [
+      {
+        path: "/repo/src/core/workflowRuntime.ts",
+        changeType: "update",
+        bytesWritten: 26,
+      },
+    ],
+    validationCommand: plan.validationCommand,
+  }));
+  setRunCommandExecutorForTesting(async (command) => ({
+    command,
+    exitCode: 0,
+    stdout: "tests passed",
+    stderr: "",
+    timedOut: false,
+    durationMs: 14,
+    signal: null,
+  }));
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const next = responses.shift();
+    if (!next) {
+      throw new Error("No more mocked LLM responses");
+    }
+
+    return next;
+  };
+
+  try {
+    const definition = createDefinition({
+      workflowName: "RuntimeEditPatchWorkflow",
+      runPlanner: async () => ({
+        summary: "edit then finalize",
+        actions: [
+          {
+            type: "edit_patch",
+            task: "Fix the timeout cleanup bug",
+            files: ["src/core/workflowRuntime.ts"],
+            reason: "The evidence is already localized",
+          },
+          {
+            type: "finalize",
+            task: "finish after patch",
+            reason: "Summarize the completed fix",
+          },
+        ],
+      }),
+      runReplanner: async () => ({
+        summary: "finalize after patch",
+        actions: [
+          {
+            type: "finalize",
+            task: "finish after patch",
+            reason: "Patch and validation are already complete",
+          },
+        ],
+      }),
+    });
+
+    const result = await runtime.runActionQueue(definition, "Fix the timeout cleanup bug");
+
+    assert.equal(result.note, "finish after patch:1");
+    assert.equal(runtime.getMeta().editActionCount, 1);
+    assert.equal(runtime.getMeta().toolCallCount, 1);
+
+    const runRecord = runtime.getRunRecord();
+    assert.equal(Array.isArray(runRecord.artifacts.patchResults), true);
+    assert.equal((runRecord.artifacts.patchResults as unknown[]).length, 1);
+    assert.equal(Array.isArray(runRecord.artifacts.commandResults), true);
+    assert.equal((runRecord.artifacts.commandResults as unknown[]).length, 1);
+    assert.ok(runRecord.steps.some((step) => step.actionType === "edit_patch"));
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+    setEditableFileContextLoaderForTesting();
+    setCodePatchApplierForTesting();
+    setRunCommandExecutorForTesting();
+  }
 });
 
 test("WorkflowRuntime records a single planner validation error when invalid planner output is retried", async () => {

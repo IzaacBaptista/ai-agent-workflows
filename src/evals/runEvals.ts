@@ -4,6 +4,10 @@ import { dirname, resolve } from "path";
 import * as llmClient from "../core/llmClient";
 import { WorkflowRunRecord, WorkflowResult } from "../core/types";
 import { getRunMemory, resetRunMemories } from "../memory/simpleMemory";
+import {
+  setCodePatchApplierForTesting,
+  setEditableFileContextLoaderForTesting,
+} from "../tools/editPatchTool";
 import { setGitToolExecutorForTesting } from "../tools/gitTool";
 import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 import { runBugWorkflow } from "../workflows/bugWorkflow";
@@ -181,6 +185,8 @@ async function executeScenario(scenario: EvalScenario): Promise<ScenarioExecutio
     };
   } finally {
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+    setEditableFileContextLoaderForTesting();
+    setCodePatchApplierForTesting();
     setRunCommandExecutorForTesting();
     setGitToolExecutorForTesting();
   }

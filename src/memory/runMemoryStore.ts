@@ -1,4 +1,5 @@
 import {
+  AppliedCodePatchResult,
   CommandExecutionResult,
   RelevantMemoryContext,
   WorkflowCritique,
@@ -51,6 +52,7 @@ function getRunSearchText(run: WorkflowRunRecord): string {
       ? run.artifacts.forcedFinalAnalysisReason
       : "",
     JSON.stringify(run.artifacts.commandResults ?? []),
+    JSON.stringify(run.artifacts.patchResults ?? []),
     JSON.stringify(run.artifacts.critiques ?? []),
     JSON.stringify(run.artifacts.validationErrors ?? []),
   ].join(" ");
@@ -154,6 +156,19 @@ export function extractCommandPatterns(runs: WorkflowRunRecord[]): string[] {
   ).slice(0, 5);
 }
 
+export function extractPatchPatterns(runs: WorkflowRunRecord[]): string[] {
+  return uniqueStrings(
+    runs.flatMap((run) =>
+      (((run.artifacts.patchResults as AppliedCodePatchResult[] | undefined) ?? [])).map(
+        (result) =>
+          `${result.validationCommand ?? "none"}:${result.edits
+            .map((edit) => edit.path.split("/").slice(-2).join("/"))
+            .join("|")}`,
+      ),
+    ),
+  ).slice(0, 5);
+}
+
 export function summarizeRelevantRuns(runs: WorkflowRunRecord[]): string {
   if (runs.length === 0) {
     return "No relevant memory found.";
@@ -171,6 +186,12 @@ export function summarizeRelevantRuns(runs: WorkflowRunRecord[]): string {
       const commandSummary = (((run.artifacts.commandResults as CommandExecutionResult[] | undefined) ?? []))
         .map((result) => `${result.command}:${getCommandStatus(result)}:${result.exitCode ?? "null"}`)
         .join(", ") || "none";
+      const patchSummary = (((run.artifacts.patchResults as AppliedCodePatchResult[] | undefined) ?? []))
+        .map(
+          (result) =>
+            `${result.edits.length} edit(s)${result.validationCommand ? `/${result.validationCommand}` : ""}`,
+        )
+        .join(", ") || "none";
 
       return [
         `- ${run.workflowName} (${run.status})`,
@@ -178,6 +199,7 @@ export function summarizeRelevantRuns(runs: WorkflowRunRecord[]): string {
         `  critiques=${critiqueCount}`,
         `  forcedFinalization=${forcedReason}`,
         `  commands=${commandSummary}`,
+        `  patches=${patchSummary}`,
       ].join("\n");
     })
     .join("\n");
@@ -192,6 +214,7 @@ export function buildRelevantMemoryContext(
   const failurePatterns = extractFailurePatterns(runs);
   const critiquePatterns = extractCritiquePatterns(runs);
   const toolLoopPatterns = extractToolLoopPatterns(runs);
+  const patchPatterns = extractPatchPatterns(runs);
   const commandPatterns = extractCommandPatterns(runs);
 
   return {
@@ -208,6 +231,9 @@ export function buildRelevantMemoryContext(
       "Tool loop patterns:",
       ...(toolLoopPatterns.length > 0 ? toolLoopPatterns.map((item) => `- ${item}`) : ["- none"]),
       "",
+      "Patch patterns:",
+      ...(patchPatterns.length > 0 ? patchPatterns.map((item) => `- ${item}`) : ["- none"]),
+      "",
       "Command patterns:",
       ...(commandPatterns.length > 0 ? commandPatterns.map((item) => `- ${item}`) : ["- none"]),
     ].join("\n"),
@@ -215,6 +241,7 @@ export function buildRelevantMemoryContext(
     failurePatterns,
     critiquePatterns,
     toolLoopPatterns,
+    patchPatterns,
     commandPatterns,
     memoryHits: runs.length,
   };

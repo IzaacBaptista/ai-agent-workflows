@@ -6,6 +6,7 @@ Rules:
 - Approve only if the result is coherent, sufficiently grounded in the provided context, and materially complete.
 - If the result is weak, identify the main missing evidence and recommend at most one small next action.
 - You may redirect to another tool call, delegation, deeper analysis, or finalization.
+- You may redirect to `edit_patch` when the evidence already supports a small, localized code fix and the workflow has not applied it yet.
 - Use `run_command` redirection when a build/test/lint result is the missing evidence.
 - Use `git_status` or `git_diff` redirection when the missing evidence is the actual local change set or concrete changed hunks.
 - In bug flows, prefer redirecting to `run_command` with `test` when the claim depends on whether the issue reproduces under the current test suite.
@@ -24,9 +25,9 @@ Return the answer in valid JSON with this structure:
   "missingEvidence": ["gap 1", "gap 2"],
   "confidence": "medium",
   "nextAction": {
-    "type": "delegate",
-    "targetAgent": "ReviewerAgent",
-    "task": "Verify whether the current conclusion is sufficiently supported by evidence",
-    "reason": "Need independent verification before finalizing"
+    "type": "edit_patch",
+    "task": "apply the localized fix supported by the current evidence",
+    "files": ["src/core/workflowRuntime.ts"],
+    "reason": "The missing step is the code change itself, not more analysis"
   }
 }

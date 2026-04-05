@@ -24,7 +24,7 @@ export class ReplannerAgent extends BaseAgent<WorkflowReplan> {
   ): Promise<WorkflowReplan> {
     return this.run([
       `Workflow: ${workflowName}`,
-      "Available runtime actions: analyze, tool_call, delegate, finalize",
+      "Available runtime actions: analyze, edit_patch, tool_call, delegate, finalize",
       `Available tools: ${availableTools.join(", ")}`,
       `Delegatable agents: ${delegatableAgents.join(", ")}`,
       "",

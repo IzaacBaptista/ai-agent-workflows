@@ -4,6 +4,7 @@ import { PRAgent } from "../agents/prAgent";
 import { PRTriageAgent } from "../agents/prTriageAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
 import {
+  AppliedCodePatchResult,
   CommandExecutionResult,
   GitDiffResult,
   GitStatusResult,
@@ -25,6 +26,7 @@ function buildPRWorkflowContext(
   triage: PRTriage | undefined,
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
+  patchResults: AppliedCodePatchResult[] | undefined,
   commandResults: CommandExecutionResult[] | undefined,
   gitStatusResult: GitStatusResult | undefined,
   gitDiffResult: GitDiffResult | undefined,
@@ -58,6 +60,12 @@ function buildPRWorkflowContext(
     "",
     "Read file results:",
     ...(fileReadResults ?? []).map((file) => `- ${file.file}: ${file.content.replace(/\n/g, " ").trim()}`),
+    "",
+    "Applied patches:",
+    ...(patchResults ?? []).flatMap((result) => [
+      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""}`,
+      ...result.edits.map((edit) => `  - ${edit.changeType} ${edit.path} bytes=${edit.bytesWritten}`),
+    ]),
     "",
     "Command results:",
     ...(commandResults ?? []).map(
@@ -154,6 +162,9 @@ const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
     const fileReadResults = runtime.getRunRecord().artifacts.fileReadResults as
       | FileReadResult[]
       | undefined;
+    const patchResults = runtime.getRunRecord().artifacts.patchResults as
+      | AppliedCodePatchResult[]
+      | undefined;
     const commandResults = runtime.getRunRecord().artifacts.commandResults as
       | CommandExecutionResult[]
       | undefined;
@@ -168,6 +179,7 @@ const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
       triage,
       codeSearchResults,
       fileReadResults,
+      patchResults,
       commandResults,
       gitStatusResult,
       gitDiffResult,

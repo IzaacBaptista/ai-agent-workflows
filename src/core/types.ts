@@ -26,6 +26,7 @@ export type RegisteredAgentName = typeof REGISTERED_AGENT_NAMES[number];
 export type RuntimeActionType =
   | "plan"
   | "analyze"
+  | "edit_patch"
   | "tool_call"
   | "delegate"
   | "critique"
@@ -44,6 +45,13 @@ export interface ToolCallRuntimeAction {
   type: "tool_call";
   toolName: WorkflowToolName | string;
   input: unknown;
+  reason: string;
+}
+
+export interface EditPatchRuntimeAction {
+  type: "edit_patch";
+  task: string;
+  files: string[];
   reason: string;
 }
 
@@ -73,6 +81,7 @@ export interface FinalizeRuntimeAction {
 
 export type RuntimeAction =
   | AnalyzeRuntimeAction
+  | EditPatchRuntimeAction
   | ToolCallRuntimeAction
   | DelegateRuntimeAction
   | CritiqueRuntimeAction
@@ -86,6 +95,8 @@ export interface WorkflowExecutionPolicy {
   maxConsecutiveNoProgress: number;
   maxToolCalls: number;
   maxRepeatedIdenticalToolCalls: number;
+  maxEditActionsPerRun: number;
+  maxFilesPerEditAction: number;
   maxDelegationsPerRun: number;
   maxDelegationDepth: number;
   maxCriticRedirects: number;
@@ -131,6 +142,7 @@ export interface WorkflowExecutionMeta {
   critiqueCount: number;
   replanCount: number;
   toolCallCount: number;
+  editActionCount: number;
   delegationCount: number;
   maxDelegationDepthReached: number;
   memoryHits: number;
@@ -194,6 +206,39 @@ export interface CommandExecutionResult {
   signal?: NodeJS.Signals | null;
 }
 
+export type CodePatchChangeType = "create" | "update";
+
+export interface CodePatchFileEdit {
+  path: string;
+  changeType: CodePatchChangeType;
+  content: string;
+  reason: string;
+}
+
+export interface CodePatchPlan {
+  summary: string;
+  edits: CodePatchFileEdit[];
+  validationCommand?: WorkflowCommandName;
+}
+
+export interface EditableFileContext {
+  path: string;
+  exists: boolean;
+  content: string;
+}
+
+export interface AppliedCodePatchEdit {
+  path: string;
+  changeType: CodePatchChangeType;
+  bytesWritten: number;
+}
+
+export interface AppliedCodePatchResult {
+  summary: string;
+  edits: AppliedCodePatchEdit[];
+  validationCommand?: WorkflowCommandName;
+}
+
 export interface GitStatusEntry {
   indexStatus: string;
   workingTreeStatus: string;
@@ -234,7 +279,7 @@ export interface WorkflowDelegationRecord {
 }
 
 export interface WorkflowValidationError {
-  kind: "tool" | "delegate" | "planner" | "replanner" | "critic";
+  kind: "tool" | "delegate" | "planner" | "replanner" | "critic" | "edit_patch";
   message: string;
   signature?: string;
   createdAt: string;
@@ -245,6 +290,7 @@ export interface WorkingMemorySnapshot {
   triage?: unknown;
   lastCritique?: WorkflowCritique;
   toolCalls: WorkflowToolCallRecord[];
+  patchResults: AppliedCodePatchResult[];
   delegations: WorkflowDelegationRecord[];
   commandResults: CommandExecutionResult[];
   commandSignals: string[];
@@ -259,6 +305,7 @@ export interface RelevantMemoryContext {
   failurePatterns: string[];
   critiquePatterns: string[];
   toolLoopPatterns: string[];
+  patchPatterns: string[];
   commandPatterns: string[];
   memoryHits: number;
 }

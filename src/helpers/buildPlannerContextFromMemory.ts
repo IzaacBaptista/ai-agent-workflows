@@ -5,6 +5,8 @@ export function buildPlannerContextFromMemory(memoryContext: RelevantMemoryConte
     "Relevant memory",
     memoryContext.summary,
     "",
+    `Patch patterns: ${memoryContext.patchPatterns.join(", ") || "none"}`,
+    "",
     `Command patterns: ${memoryContext.commandPatterns.join(", ") || "none"}`,
     "",
     `Memory hits: ${memoryContext.memoryHits}`,

@@ -3,7 +3,13 @@ import { IssueAgent } from "../agents/issueAgent";
 import { IssueTriageAgent } from "../agents/issueTriageAgent";
 import { PlannerAgent } from "../agents/plannerAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
-import { CommandExecutionResult, IssueAnalysis, IssueTriage, WorkflowResult } from "../core/types";
+import {
+  AppliedCodePatchResult,
+  CommandExecutionResult,
+  IssueAnalysis,
+  IssueTriage,
+  WorkflowResult,
+} from "../core/types";
 import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
@@ -18,6 +24,7 @@ function buildIssueWorkflowContext(
   triage: IssueTriage | undefined,
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
+  patchResults: AppliedCodePatchResult[] | undefined,
   commandResults: CommandExecutionResult[] | undefined,
 ): string {
   return [
@@ -49,6 +56,12 @@ function buildIssueWorkflowContext(
     "",
     "Read file results:",
     ...(fileReadResults ?? []).map((file) => `- ${file.file}: ${file.content.replace(/\n/g, " ").trim()}`),
+    "",
+    "Applied patches:",
+    ...(patchResults ?? []).flatMap((result) => [
+      `- ${result.summary}${result.validationCommand ? ` (validate with ${result.validationCommand})` : ""}`,
+      ...result.edits.map((edit) => `  - ${edit.changeType} ${edit.path} bytes=${edit.bytesWritten}`),
+    ]),
     "",
     "Command results:",
     ...(commandResults ?? []).map(
@@ -125,10 +138,20 @@ const issueWorkflowDefinition: WorkflowDefinition<IssueTriage, IssueAnalysis> = 
     const fileReadResults = runtime.getRunRecord().artifacts.fileReadResults as
       | FileReadResult[]
       | undefined;
+    const patchResults = runtime.getRunRecord().artifacts.patchResults as
+      | AppliedCodePatchResult[]
+      | undefined;
     const commandResults = runtime.getRunRecord().artifacts.commandResults as
       | CommandExecutionResult[]
       | undefined;
-    return buildIssueWorkflowContext(input, triage, codeSearchResults, fileReadResults, commandResults);
+    return buildIssueWorkflowContext(
+      input,
+      triage,
+      codeSearchResults,
+      fileReadResults,
+      patchResults,
+      commandResults,
+    );
   },
   buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
     buildIssueCritiqueContext(input, finalContext),

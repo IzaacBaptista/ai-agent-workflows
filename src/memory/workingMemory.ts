@@ -1,4 +1,5 @@
 import {
+  AppliedCodePatchResult,
   CommandExecutionResult,
   WorkflowCritique,
   WorkflowDelegationRecord,
@@ -49,6 +50,10 @@ function buildEvidence(run: WorkflowRunRecord): string[] {
     evidence.push("command_results");
   }
 
+  if (run.artifacts.patchResults) {
+    evidence.push("patch_results");
+  }
+
   if (run.artifacts.gitStatusResult) {
     evidence.push("git_status_result");
   }
@@ -70,12 +75,14 @@ function buildEvidence(run: WorkflowRunRecord): string[] {
 
 export function buildWorkingMemory(run: WorkflowRunRecord): WorkingMemorySnapshot {
   const commandResults = safeArray<CommandExecutionResult>(run.artifacts.commandResults);
+  const patchResults = safeArray<AppliedCodePatchResult>(run.artifacts.patchResults);
 
   return {
     workflowName: run.workflowName,
     triage: run.artifacts.triage,
     lastCritique: safeArray<WorkflowCritique>(run.artifacts.critiques).slice(-1)[0],
     toolCalls: safeArray<WorkflowToolCallRecord>(run.artifacts.toolCalls),
+    patchResults,
     delegations: safeArray<WorkflowDelegationRecord>(run.artifacts.delegations),
     commandResults,
     commandSignals: buildCommandSignals(commandResults),
@@ -90,15 +97,18 @@ export function buildWorkingMemory(run: WorkflowRunRecord): WorkingMemorySnapsho
 
 export function summarizeWorkingMemory(memory: WorkingMemorySnapshot): string {
   const latestCommand = memory.commandResults[memory.commandResults.length - 1];
+  const latestPatch = memory.patchResults[memory.patchResults.length - 1];
 
   return [
     `Workflow: ${memory.workflowName}`,
     `Has triage: ${memory.triage ? "yes" : "no"}`,
     `Tool calls: ${memory.toolCalls.length}`,
+    `Patch results: ${memory.patchResults.length}`,
     `Delegations: ${memory.delegations.length}`,
     `Command results: ${memory.commandResults.length}`,
     `Command signals: ${memory.commandSignals.join(", ") || "none"}`,
     `Latest command: ${latestCommand ? `${latestCommand.command}:${getCommandStatus(latestCommand)}:${latestCommand.exitCode ?? "null"}` : "none"}`,
+    `Latest patch: ${latestPatch ? `${latestPatch.edits.length} edits${latestPatch.validationCommand ? ` validated with ${latestPatch.validationCommand}` : ""}` : "none"}`,
     `Last critique: ${memory.lastCritique?.summary ?? "none"}`,
     `Forced finalization reason: ${memory.forcedFinalizationReason ?? "none"}`,
     `Validation errors: ${memory.validationErrors.length}`,
@@ -117,6 +127,10 @@ export function getWorkingMemorySignature(memory: WorkingMemorySnapshot): string
     forcedFinalizationReason: memory.forcedFinalizationReason ?? "",
     validationErrors: memory.validationErrors.map((entry) => entry.message),
     evidence: memory.evidence,
+    patchResults: memory.patchResults.map((result) => ({
+      edits: result.edits.map((edit) => `${edit.changeType}:${edit.path}`),
+      validationCommand: result.validationCommand ?? "",
+    })),
     commandSignals: memory.commandSignals,
     commandResults: memory.commandResults.map((result) => ({
       command: result.command,
@@ -139,6 +153,10 @@ export function getCommandDecisionSignature(memory: WorkingMemorySnapshot): stri
     forcedFinalizationReason: memory.forcedFinalizationReason ?? "",
     validationErrors: memory.validationErrors.map((entry) => entry.message),
     nonCommandEvidence: memory.evidence.filter((item) => item !== "command_results"),
+    patchResults: memory.patchResults.map((result) => ({
+      edits: result.edits.map((edit) => `${edit.changeType}:${edit.path}`),
+      validationCommand: result.validationCommand ?? "",
+    })),
     nonCommandToolCalls: memory.toolCalls
       .filter((call) => call.toolName !== "run_command")
       .map((call) => `${call.toolName}:${call.signature}:${call.suppressed ? "suppressed" : "executed"}`),

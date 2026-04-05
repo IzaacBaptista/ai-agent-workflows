@@ -55,6 +55,9 @@ export function buildWorkflowActionGuidance(workflowName: string, context: strin
     `Detected command-driven verification signals: ${commandSignals.length > 0 ? commandSignals.join(", ") : "none"}`,
     "- Reuse existing command results when they already answer the build/test question; do not request the same command again unless the state changed materially.",
     "- Prefer `run_command` over extra `search_code` and `read_file` steps when the remaining uncertainty is best answered by executable build/test evidence.",
+    "- Use `edit_patch` only when the problem is clearly repository-local, the fix is reasonably localized, and the target files are known.",
+    "- `edit_patch` must name specific files. Prefer at most 1-3 files and avoid broad refactors in a single patch step.",
+    "- After `edit_patch`, prefer validation with `run_command` unless an equivalent command result already exists for the new state.",
   ];
 
   if (workflowName === "BugWorkflow") {
@@ -62,6 +65,7 @@ export function buildWorkflowActionGuidance(workflowName: string, context: strin
       "- In BugWorkflow, prefer `run_command` with `test` for hangs, timeouts, open handles, CI failures, runtime regressions, or test-related symptoms after minimal code localization.",
       "- In BugWorkflow, prefer `run_command` with `build` when the likely issue is compile, type, integration, or packaging breakage.",
       "- In BugWorkflow, prefer `run_command` with `lint` for static type-check or code-quality regressions when executable runtime evidence is not necessary yet.",
+      "- In BugWorkflow, once the likely fix is localized, prefer `edit_patch` for a small code change and validate it immediately with the narrowest useful command.",
     );
   } else if (workflowName === "PRReviewWorkflow") {
     lines.push(
@@ -70,10 +74,12 @@ export function buildWorkflowActionGuidance(workflowName: string, context: strin
       "- In PRReviewWorkflow, prefer `run_command` with `lint` for static hygiene checks around types, tooling, and surface-level integration changes when a full build is not the narrowest proof needed.",
       "- In PRReviewWorkflow, prefer `git_status` to understand the current local change set and `git_diff` to inspect concrete modified hunks when the review needs real repository context beyond the user-provided summary.",
       "- Do not give a high-confidence PR conclusion about safety if build/test evidence is the main missing proof and no relevant command result exists yet.",
+      "- In PRReviewWorkflow, use `edit_patch` only when the task is explicitly to fix the change or address a concrete review finding, not for ordinary review-only analysis.",
     );
   } else if (workflowName === "IssueWorkflow") {
     lines.push(
       "- In IssueWorkflow, use `run_command` only for repository-local runtime, build, test, or static-check regressions; generic product issues should still prefer analysis and code/context gathering.",
+      "- In IssueWorkflow, use `edit_patch` only when the issue clearly asks for an implementation or fix in this repository.",
     );
   }
 
