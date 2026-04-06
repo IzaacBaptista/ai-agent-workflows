@@ -60,13 +60,15 @@ import {
 } from "./types";
 import { isLlmProviderError } from "./llmClient";
 
-let runtimeSleepFn: (ms: number) => Promise<void> = (ms) =>
+const defaultRuntimeSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
 
+let runtimeSleepFn: (ms: number) => Promise<void> = defaultRuntimeSleep;
+
 export function setRuntimeSleepForTesting(fn?: (ms: number) => Promise<void>): void {
-  runtimeSleepFn = fn ?? ((ms) => new Promise((resolve) => { setTimeout(resolve, ms); }));
+  runtimeSleepFn = fn ?? defaultRuntimeSleep;
 }
 
 interface WorkflowRuntimeOptions {

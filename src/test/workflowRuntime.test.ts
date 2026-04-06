@@ -229,46 +229,48 @@ test("WorkflowRuntime retries a step on rate-limit error and sleeps for retryAft
     sleepCalls.push(ms);
   });
 
-  const runtime = new WorkflowRuntime({
-    workflowName: "ProviderFailureWorkflow",
-    input: "provider failure input",
-    policy: {
-      maxSteps: 5,
-      maxRetriesPerStep: 1,
-      timeoutMs: 1000,
-    },
-  });
+  try {
+    const runtime = new WorkflowRuntime({
+      workflowName: "ProviderFailureWorkflow",
+      input: "provider failure input",
+      policy: {
+        maxSteps: 5,
+        maxRetriesPerStep: 1,
+        timeoutMs: 1000,
+      },
+    });
 
-  let attemptCount = 0;
+    let attemptCount = 0;
 
-  await assert.rejects(
-    () =>
-      runtime.executeStep(
-        "plan",
-        async () => {
-          attemptCount += 1;
-          throw new LlmProviderError(
-            "rate_limit",
-            "LLM provider rate limit reached. Retry after approximately 3s.",
-            { retryAfterMs: 3000 },
-          );
-        },
-        {
-          agentName: "PlannerAgent",
-          inputSummary: "provider-limited planning",
-        },
-      ),
-    /rate limit reached/i,
-  );
+    await assert.rejects(
+      () =>
+        runtime.executeStep(
+          "plan",
+          async () => {
+            attemptCount += 1;
+            throw new LlmProviderError(
+              "rate_limit",
+              "LLM provider rate limit reached. Retry after approximately 3s.",
+              { retryAfterMs: 3000 },
+            );
+          },
+          {
+            agentName: "PlannerAgent",
+            inputSummary: "provider-limited planning",
+          },
+        ),
+      /rate limit reached/i,
+    );
 
-  assert.equal(attemptCount, 2);
-  assert.equal(sleepCalls.length, 1);
-  assert.equal(sleepCalls[0], 3000);
-  assert.equal(runtime.getRunRecord().steps.length, 2);
-  assert.equal(runtime.getRunRecord().steps[0]?.attempt, 1);
-  assert.equal(runtime.getRunRecord().steps[1]?.attempt, 2);
-
-  setRuntimeSleepForTesting();
+    assert.equal(attemptCount, 2);
+    assert.equal(sleepCalls.length, 1);
+    assert.equal(sleepCalls[0], 3000);
+    assert.equal(runtime.getRunRecord().steps.length, 2);
+    assert.equal(runtime.getRunRecord().steps[0]?.attempt, 1);
+    assert.equal(runtime.getRunRecord().steps[1]?.attempt, 2);
+  } finally {
+    setRuntimeSleepForTesting();
+  }
 });
 
 test("WorkflowRuntime fails timed out step and records failure", async () => {
