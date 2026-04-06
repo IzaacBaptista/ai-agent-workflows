@@ -6,6 +6,7 @@ import { loadPrompt } from "../helpers/loadPrompt";
 
 const jiraAnalysisSchema = z.object({
   summary: z.string(),
+  relevantFiles: z.array(z.string()),
   implementationPlan: z.array(z.string()),
   acceptanceCriteria: z.array(z.string()),
   risks: z.array(z.string()),

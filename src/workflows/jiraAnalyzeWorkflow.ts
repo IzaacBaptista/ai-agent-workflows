@@ -1,36 +1,10 @@
-import { CriticAgent } from "../agents/criticAgent";
-import { IssueTriageAgent } from "../agents/issueTriageAgent";
 import { JiraAnalyzeAgent } from "../agents/jiraAnalyzeAgent";
-import { PlannerAgent } from "../agents/plannerAgent";
-import { ReplannerAgent } from "../agents/replannerAgent";
 import { env } from "../config/env";
-import {
-  AppliedCodePatchResult,
-  CommandExecutionResult,
-  IssueTriage,
-  JiraAnalysis,
-  RuntimeAction,
-  WorkflowValidationError,
-  WorkflowResult,
-} from "../core/types";
-import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
+import { IssueRepositoryContext, JiraAnalysis, WorkflowResult } from "../core/types";
+import { WorkflowRuntime } from "../core/workflowRuntime";
+import { collectIssueRepositoryContext } from "../helpers/collectIssueRepositoryContext";
 import { fetchJiraIssue } from "../integrations/jira/fetchJiraIssue";
 import { formatJiraIssue } from "../integrations/jira/formatJiraIssue";
-import { CodeSearchResult } from "../tools/codeSearchTool";
-import { FileReadResult } from "../tools/readFileTool";
-import {
-  summarizeCodeSearchResults,
-  summarizeCompletedAction,
-  summarizeCommandResults,
-  summarizeEvidenceOverview,
-  summarizeFileReadResults,
-  summarizePatchResults,
-  summarizeRecentSteps,
-  summarizeRemainingActions,
-  summarizeRuntimeBudget,
-  summarizeStringList,
-  summarizeValidationErrors,
-} from "./contextSummary";
 import {
   logAgentExecutionFailure,
   logAgentExecutionSuccess,
@@ -38,149 +12,18 @@ import {
 } from "../tools/loggingTool";
 import { buildLlmPreflightFailure } from "./workflowPreflight";
 
-function buildJiraAnalyzeWorkflowContext(
-  input: string,
-  triage: IssueTriage | undefined,
-  codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
-  fileReadResults: FileReadResult[] | undefined,
-  patchResults: AppliedCodePatchResult[] | undefined,
-  commandResults: CommandExecutionResult[] | undefined,
+function buildJiraAnalyzeAgentInput(
+  issueContext: string,
+  repositoryContext: IssueRepositoryContext,
 ): string {
   return [
     "Jira issue context:",
-    input,
+    issueContext,
     "",
-    "Triage summary:",
-    triage?.summary ?? "No triage available",
-    "",
-    ...summarizeStringList("Investigation areas:", triage?.investigationAreas),
-    "",
-    ...summarizeStringList("Validation checks:", triage?.validationChecks),
-    "",
-    ...summarizeCodeSearchResults(codeSearchResults),
-    "",
-    ...summarizeFileReadResults(fileReadResults),
-    "",
-    ...summarizePatchResults(patchResults),
-    "",
-    ...summarizeCommandResults(commandResults),
+    "Repository investigation context:",
+    repositoryContext.promptContext,
   ].join("\n");
 }
-
-function buildJiraAnalyzeCritiqueContext(input: string, workflowContext: string): string {
-  return [
-    "Original Jira issue:",
-    input,
-    "",
-    "Analysis context:",
-    workflowContext,
-  ].join("\n");
-}
-
-function buildReplanContext(
-  originalInput: string,
-  completedAction: unknown,
-  runtime: WorkflowRuntime,
-  remainingActions: RuntimeAction[],
-): string {
-  const run = runtime.getRunRecord();
-  const meta = runtime.getMeta();
-  const validationErrors = run.artifacts.validationErrors as
-    | WorkflowValidationError[]
-    | undefined;
-
-  return [
-    "Original Jira issue:",
-    originalInput,
-    "",
-    ...summarizeCompletedAction(completedAction),
-    "",
-    ...summarizeRuntimeBudget(run, meta),
-    "",
-    ...summarizeEvidenceOverview(run),
-    "",
-    ...summarizeRecentSteps(run.steps),
-    "",
-    ...summarizeValidationErrors(validationErrors),
-    "",
-    ...summarizeRemainingActions(remainingActions),
-    "",
-    "Guidance:",
-    "- If repository evidence is already sufficient and budget pressure is medium or high, prefer finalize over more search_code/read_file steps.",
-  ].join("\n");
-}
-
-const jiraAnalyzeWorkflowDefinition: WorkflowDefinition<IssueTriage, JiraAnalysis> = {
-  workflowName: "JiraAnalyzeWorkflow",
-  triageAgentName: "IssueTriageAgent",
-  finalAgentName: "JiraAnalyzeAgent",
-  runPlanner: (input, memoryContext, availableTools, delegatableAgents) => {
-    const agent = new PlannerAgent();
-    return agent.runForWorkflow(
-      "JiraAnalyzeWorkflow",
-      input,
-      memoryContext,
-      availableTools,
-      delegatableAgents,
-    );
-  },
-  runReplanner: (context, memoryContext, availableTools, delegatableAgents) => {
-    const agent = new ReplannerAgent();
-    return agent.runForWorkflow(
-      "JiraAnalyzeWorkflow",
-      context,
-      memoryContext,
-      availableTools,
-      delegatableAgents,
-    );
-  },
-  runCritic: (context, candidateResult, workingMemory, memoryContext) => {
-    const critic = new CriticAgent();
-    return critic.review(
-      "JiraAnalyzeWorkflow",
-      context,
-      candidateResult,
-      workingMemory,
-      memoryContext,
-    );
-  },
-  runTriage: async (task, input) => {
-    const agent = new IssueTriageAgent();
-    return agent.run([`Task:\n${task}`, "", "Jira issue:", input].join("\n"));
-  },
-  runFinal: async (task, context) => {
-    const agent = new JiraAnalyzeAgent();
-    return agent.run([`Task:\n${task}`, "", context].join("\n"));
-  },
-  buildFinalContext: (input, runtime, triage) => {
-    const codeSearchResults = runtime.getRunRecord().artifacts.codeSearchResults as
-      | Record<string, CodeSearchResult[]>
-      | undefined;
-    const fileReadResults = runtime.getRunRecord().artifacts.fileReadResults as
-      | FileReadResult[]
-      | undefined;
-    const patchResults = runtime.getRunRecord().artifacts.patchResults as
-      | AppliedCodePatchResult[]
-      | undefined;
-    const commandResults = runtime.getRunRecord().artifacts.commandResults as
-      | CommandExecutionResult[]
-      | undefined;
-    return buildJiraAnalyzeWorkflowContext(
-      input,
-      triage,
-      codeSearchResults,
-      fileReadResults,
-      patchResults,
-      commandResults,
-    );
-  },
-  buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
-    buildJiraAnalyzeCritiqueContext(input, finalContext),
-  buildReplanContext: (input, completedAction, runtime, remainingActions) =>
-    buildReplanContext(input, completedAction, runtime, remainingActions),
-  summarizeTriage: (triage) => `investigationAreas=${triage.investigationAreas.length}`,
-  summarizeResult: (result) => `implementationPlan=${result.implementationPlan.length}`,
-};
 
 export async function runJiraAnalyzeWorkflow(
   issueKey: string,
@@ -188,7 +31,7 @@ export async function runJiraAnalyzeWorkflow(
   const preflightFailure = buildLlmPreflightFailure<JiraAnalysis>(
     "JiraAnalyzeWorkflow",
     `Jira issue key: ${issueKey}`,
-    { jiraIssueKey: issueKey },
+    { jiraIssueKey: issueKey, repoRoot: process.cwd() },
   );
   if (preflightFailure) {
     return preflightFailure;
@@ -201,15 +44,48 @@ export async function runJiraAnalyzeWorkflow(
   });
 
   const input = formatJiraIssue(issue);
-
   const execution = startAgentExecution("JiraAnalyzeWorkflow", input);
   const runtime = new WorkflowRuntime({
     workflowName: "JiraAnalyzeWorkflow",
     input,
+    repoRoot: process.cwd(),
   });
 
+  runtime.saveArtifact("jiraIssueKey", issueKey);
+  runtime.saveArtifact("jiraIssue", issue);
+
   try {
-    const result = await runtime.runActionQueue(jiraAnalyzeWorkflowDefinition, input);
+    const repositoryContext = await runtime.executeStep(
+      "collect_context",
+      async () => collectIssueRepositoryContext(issue, process.cwd()),
+      {
+        inputSummary: `Collect deterministic repository context for ${issueKey}`,
+        outputSummary: (value) => (value as IssueRepositoryContext).summary,
+      },
+    );
+
+    runtime.saveArtifact("issueRepositoryContext", repositoryContext);
+    runtime.saveArtifact("codeSearchResults", repositoryContext.codeSearchResults);
+    runtime.saveArtifact("fileReadResults", repositoryContext.fileReadResults);
+    runtime.saveArtifact("gitStatusResult", repositoryContext.gitStatus);
+    runtime.saveArtifact("gitDiffResult", repositoryContext.gitDiff);
+    runtime.saveArtifact("context", repositoryContext.promptContext);
+
+    const result = await runtime.executeStep(
+      "finalize",
+      async () => {
+        const agent = new JiraAnalyzeAgent();
+        return agent.run(buildJiraAnalyzeAgentInput(input, repositoryContext));
+      },
+      {
+        agentName: "JiraAnalyzeAgent",
+        inputSummary: "Generate a technical plan from the Jira issue and repository evidence",
+        outputSummary: (value) =>
+          `implementationPlan=${(value as JiraAnalysis).implementationPlan.length},relevantFiles=${(value as JiraAnalysis).relevantFiles.length}`,
+      },
+    );
+
+    runtime.saveArtifact("result", result);
     runtime.complete();
     logAgentExecutionSuccess(execution, input, result);
     return {

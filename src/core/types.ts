@@ -377,10 +377,33 @@ export interface PRTriage {
 
 export interface JiraAnalysis {
   summary: string;
+  relevantFiles: string[];
   implementationPlan: string[];
   acceptanceCriteria: string[];
   risks: string[];
   testScenarios: string[];
+  suggestedBranchName: string;
+  suggestedPRTitle: string;
+}
+
+export interface IssueRepositoryContext {
+  summary: string;
+  searchTerms: string[];
+  relevantFiles: string[];
+  codeSearchResults: Record<string, Array<{ file: string; line: number; snippet: string }>>;
+  fileReadResults: Array<{ file: string; content: string }>;
+  gitStatus: GitStatusResult;
+  gitDiff: GitDiffResult;
+  promptContext: string;
+}
+
+export interface JiraApplyResult {
+  summary: string;
+  analysis: JiraAnalysis;
+  patchSummary: string;
+  editedFiles: string[];
+  validationCommand?: WorkflowCommandName;
+  validationResult?: CommandExecutionResult;
   suggestedBranchName: string;
   suggestedPRTitle: string;
 }
@@ -395,6 +418,12 @@ export interface PRCreatePlan {
 export interface PRCreateResult extends PRCreatePlan {
   prUrl?: string;
   prNumber?: number;
+}
+
+export interface JiraPrResult extends PRCreateResult {
+  summary: string;
+  branchName: string;
+  commitMessage: string;
 }
 
 export interface RepoInvestigationResult {

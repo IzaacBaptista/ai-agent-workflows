@@ -13,6 +13,8 @@ import { runBugWorkflow } from "./workflows/bugWorkflow";
 import { runPRReviewWorkflow } from "./workflows/prReviewWorkflow";
 import { runJiraIssueWorkflow } from "./workflows/jiraIssueWorkflow";
 import { runJiraAnalyzeWorkflow } from "./workflows/jiraAnalyzeWorkflow";
+import { runJiraApplyWorkflow } from "./workflows/jiraApplyWorkflow";
+import { runJiraPrWorkflow } from "./workflows/jiraPrWorkflow";
 import { runPRCreateWorkflow } from "./workflows/prCreateWorkflow";
 import { runRepoInvestigateWorkflow } from "./workflows/repoInvestigateWorkflow";
 import { resetRunMemories } from "./memory/simpleMemory";
@@ -24,6 +26,8 @@ Usage: ai <namespace> <subcommand> <arg> [--repo <path>] [--output raw|summary|t
 Namespaced commands:
   jira issue <KEY>          Analyse a Jira issue (e.g. REL-123)
   jira analyze <KEY>        Deep technical analysis of a Jira issue
+  jira apply <KEY>          Apply the approved Jira analysis as a localized patch
+  jira pr <KEY>             Commit, push, and open a GitHub PR for the applied Jira patch
   github pr review <NUMBER> Review a GitHub pull request by number
   github pr create <KEY>    Draft and optionally open a GitHub PR from a Jira issue
   repo investigate "<query>"  Investigate a query against the local repository
@@ -37,6 +41,8 @@ Examples:
   ai jira issue REL-123
   ai jira analyze REL-123
   ai jira analyze REL-123 --repo ~/Projects/srp
+  ai jira apply REL-123 --repo ~/Projects/srp
+  ai jira pr REL-123 --repo ~/Projects/srp
   ai github pr review 42
   ai github pr create REL-123
   ai repo investigate "timeout not cleared in auth middleware"
@@ -126,6 +132,10 @@ async function main(): Promise<void> {
       result = await runJiraIssueWorkflow(command.issueKey);
     } else if (command.kind === "jira-analyze") {
       result = await runJiraAnalyzeWorkflow(command.issueKey);
+    } else if (command.kind === "jira-apply") {
+      result = await runJiraApplyWorkflow(command.issueKey);
+    } else if (command.kind === "jira-pr") {
+      result = await runJiraPrWorkflow(command.issueKey);
     } else if (command.kind === "github-pr-review") {
       result = await runPRReviewWorkflow(command.input);
     } else if (command.kind === "github-pr-create") {

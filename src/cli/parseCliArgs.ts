@@ -3,6 +3,8 @@ import { normalizeOutputMode, OutputMode } from "../reporting/reportingTypes";
 export type ParsedCliCommand =
   | { kind: "jira-issue"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
   | { kind: "jira-analyze"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "jira-apply"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "jira-pr"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
   | { kind: "github-pr-review"; input: string; outputMode: OutputMode; repoRoot?: string }
   | { kind: "github-pr-create"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
   | { kind: "repo-investigate"; query: string; outputMode: OutputMode; repoRoot?: string }
@@ -76,6 +78,14 @@ export function parseCliArgs(argv: string[]): ParsedCliCommand {
 
     if (subcommand === "analyze" && arg) {
       return { kind: "jira-analyze", issueKey: arg, outputMode, repoRoot };
+    }
+
+    if (subcommand === "apply" && arg) {
+      return { kind: "jira-apply", issueKey: arg, outputMode, repoRoot };
+    }
+
+    if (subcommand === "pr" && arg) {
+      return { kind: "jira-pr", issueKey: arg, outputMode, repoRoot };
     }
 
     return { kind: "unknown", raw: [namespace, subcommand ?? "", ...rest] };

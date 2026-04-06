@@ -16,7 +16,9 @@ This project is an agentic engineering runtime with a CLI interface. It can read
 | Command | Description |
 |---------|-------------|
 | `ai jira issue <KEY>` | Analyse a Jira issue and produce a structured breakdown with a technical plan, acceptance criteria, test scenarios, risks, and assumptions. |
-| `ai jira analyze <KEY>` | Deep technical analysis of a Jira issue: implementation plan, suggested branch name, PR title, acceptance criteria, and test scenarios. |
+| `ai jira analyze <KEY> --repo <PATH>` | Deep technical analysis of a Jira issue against a target repository: relevant files, implementation plan, suggested branch name, PR title, acceptance criteria, and test scenarios. |
+| `ai jira apply <KEY> --repo <PATH>` | Apply the approved Jira analysis as a localized patch in the target repository and run the narrowest validation command. |
+| `ai jira pr <KEY> --repo <PATH>` | Commit, push, and open a GitHub PR for the latest successful Jira apply run in the target repository. |
 | `ai github pr review <NUMBER>` | Review a GitHub pull request by number using live repository context. |
 | `ai github pr create <KEY>` | Draft a GitHub pull request from a Jira issue. If `GITHUB_TOKEN` and `GITHUB_REPO` are configured, the PR is opened automatically. |
 | `ai repo investigate "<query>"` | Investigate a free-text query against the local repository using code search, file reads, and git history. |
@@ -24,13 +26,12 @@ This project is an agentic engineering runtime with a CLI interface. It can read
 | `ai bug "<text>"` | Diagnose a bug report (flat alias). |
 | `ai pr "<text>"` | Review a pull request description (flat alias). |
 
-Each workflow runs as a multi-agent execution loop:
+The main Jira workflow is now intentionally more opinionated:
 
-1. A planner proposes the next actions.
-2. A specialist, tool call, or delegated agent executes.
-3. A replanner can replace the remaining action queue based on run state and memory.
-4. A final analysis agent produces a candidate result.
-5. A critic agent can approve the result or redirect the workflow to a specific next action.
+1. Fetch the Jira issue.
+2. Inspect the target repository with deterministic tools.
+3. Ask the LLM for a structured analysis or localized patch.
+4. Optionally validate the patch, commit it, push the branch, and open the PR.
 
 Responses are generated through the OpenAI Responses API and validated with [Zod](https://zod.dev/) before being returned.
 
@@ -150,7 +151,7 @@ See [`ai-agent.config.example.json`](./ai-agent.config.example.json) for a compl
 
 - `edit_patch` is used only for localized repository changes with explicit target files.
 - `CoderAgent` produces structured patch plans with full replacement file contents for the selected files.
-- Patch application is scope-limited to approved project paths such as `src/`, `prompts/`, `docs/`, `evals/`, `scripts/`, and a few root config/docs files.
+- Patch application is scope-limited to the approved project paths from `ai-agent.config.json` (`allowedPaths`). If no project config is present, it defaults to the repository root.
 - Patch execution now runs inside a temporary isolated Git worktree instead of mutating the main workspace directly.
 - When a patch requests validation, the runtime captures validation both before and after the patch inside that isolated worktree.
 - Patch artifacts include `validationOutcome`, isolated `git_status` / `git_diff`, unexpected changed files, and whether the temporary worktree cleaned up successfully.
@@ -168,8 +169,8 @@ See [`ai-agent.config.example.json`](./ai-agent.config.example.json) for a compl
 ### File reading guardrails
 
 - `read_file` is limited to files inside the paths defined in `ai-agent.config.json` (`allowedPaths`).
-- If no project config is present, it defaults to `src/`.
-- Supported extensions are `.ts`, `.js`, `.json`, and `.md`.
+- If no project config is present, it defaults to the repository root.
+- Supported extensions include common application languages such as `.ts`, `.js`, `.php`, `.py`, `.java`, `.go`, `.rs`, `.vue`, `.sql`, `.json`, `.md`, and `.sh`.
 - This prevents the workflow runtime from reading arbitrary local files.
 
 ## Running workflows
@@ -183,7 +184,19 @@ ai jira issue REL-123
 ### Jira deep technical analysis
 
 ```bash
-ai jira analyze REL-123
+ai jira analyze REL-123 --repo ~/Projects/srp
+```
+
+### Jira patch application
+
+```bash
+ai jira apply REL-123 --repo ~/Projects/srp
+```
+
+### Jira PR opening
+
+```bash
+ai jira pr REL-123 --repo ~/Projects/srp
 ```
 
 ### GitHub PR review (by PR number, fetches from GitHub API)

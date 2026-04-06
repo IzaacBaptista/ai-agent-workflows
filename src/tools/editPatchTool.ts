@@ -5,8 +5,31 @@ import {
   CodePatchPlan,
   EditableFileContext,
 } from "../core/types";
+import { getProjectConfig } from "../config/projectConfig";
 
-const ALLOWED_EDIT_EXTENSIONS = new Set([".ts", ".js", ".json", ".md", ".sh"]);
+const ALLOWED_EDIT_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".md",
+  ".sh",
+  ".php",
+  ".py",
+  ".rb",
+  ".java",
+  ".go",
+  ".rs",
+  ".kt",
+  ".swift",
+  ".yaml",
+  ".yml",
+  ".sql",
+  ".vue",
+]);
 
 type EditableFileContextLoader = (files: string[], baseDir?: string) => EditableFileContext[];
 type CodePatchApplier = (
@@ -19,30 +42,15 @@ let editableFileContextLoader: EditableFileContextLoader = defaultLoadEditableFi
 let codePatchApplier: CodePatchApplier = defaultApplyCodePatchPlan;
 
 function buildAllowedEditRoots(baseDir = process.cwd()): string[] {
-  return [
-    resolve(baseDir, "src"),
-    resolve(baseDir, "prompts"),
-    resolve(baseDir, "docs"),
-    resolve(baseDir, "evals"),
-    resolve(baseDir, "scripts"),
-  ];
-}
+  const config = getProjectConfig(baseDir);
+  if (config.allowedPaths && config.allowedPaths.length > 0) {
+    return config.allowedPaths.map((entry) => resolve(baseDir, entry));
+  }
 
-function buildAllowedEditFiles(baseDir = process.cwd()): Set<string> {
-  return new Set([
-    resolve(baseDir, "README.md"),
-    resolve(baseDir, "package.json"),
-    resolve(baseDir, "tsconfig.json"),
-  ]);
+  return [resolve(baseDir)];
 }
 
 function isAllowedEditPath(absolutePath: string, baseDir = process.cwd()): boolean {
-  const allowedEditFiles = buildAllowedEditFiles(baseDir);
-
-  if (allowedEditFiles.has(absolutePath)) {
-    return true;
-  }
-
   return buildAllowedEditRoots(baseDir).some(
     (allowedRoot) => absolutePath === allowedRoot || absolutePath.startsWith(`${allowedRoot}/`),
   );
@@ -51,13 +59,12 @@ function isAllowedEditPath(absolutePath: string, baseDir = process.cwd()): boole
 function resolveEditablePath(file: string, baseDir = process.cwd()): string {
   const absolutePath = resolve(baseDir, file);
   const extension = extname(absolutePath);
-  const allowedEditFiles = buildAllowedEditFiles(baseDir);
 
   if (!isAllowedEditPath(absolutePath, baseDir)) {
     throw new Error(`File "${file}" is outside the allowed edit scope`);
   }
 
-  if (!ALLOWED_EDIT_EXTENSIONS.has(extension) && !allowedEditFiles.has(absolutePath)) {
+  if (!ALLOWED_EDIT_EXTENSIONS.has(extension)) {
     throw new Error(`File "${file}" has unsupported extension "${extension}"`);
   }
 

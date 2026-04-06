@@ -562,6 +562,23 @@ test("parseCliArgs reads output mode and falls back to raw when invalid", () => 
     "--output",
     "summary",
   ]);
+  const applyArgs = parseCliArgs([
+    "node",
+    "src/index.ts",
+    "jira",
+    "apply",
+    "REL-5391",
+    "--repo=/tmp/srp",
+  ]);
+  const prArgs = parseCliArgs([
+    "node",
+    "src/index.ts",
+    "jira",
+    "pr",
+    "REL-5391",
+    "--repo",
+    "/tmp/srp",
+  ]);
 
   assert.ok(summaryArgs.kind === "bug");
   assert.equal(summaryArgs.outputMode, "timeline");
@@ -571,4 +588,8 @@ test("parseCliArgs reads output mode and falls back to raw when invalid", () => 
   assert.ok(repoArgs.kind === "jira-analyze");
   assert.equal(repoArgs.repoRoot, "/tmp/srp");
   assert.equal(repoArgs.outputMode, "summary");
+  assert.ok(applyArgs.kind === "jira-apply");
+  assert.equal(applyArgs.repoRoot, "/tmp/srp");
+  assert.ok(prArgs.kind === "jira-pr");
+  assert.equal(prArgs.repoRoot, "/tmp/srp");
 });

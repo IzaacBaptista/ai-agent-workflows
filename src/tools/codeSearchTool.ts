@@ -100,13 +100,13 @@ function buildSnippet(lines: string[], index: number): string {
   return lines.slice(start, end).join("\n").trim();
 }
 
-export function searchCode(term: string, limit = 5): CodeSearchResult[] {
+export function searchCode(term: string, limit = 5, baseDir = process.cwd()): CodeSearchResult[] {
   if (!term.trim()) {
     return [];
   }
 
   const normalizedTerm = term.toLowerCase();
-  const files = Array.from(new Set(getSearchRoots().flatMap((root) => collectFiles(root))));
+  const files = Array.from(new Set(getSearchRoots(baseDir).flatMap((root) => collectFiles(root))));
   const results: CodeSearchResult[] = [];
 
   for (const file of files) {
