@@ -1,19 +1,24 @@
 import { normalizeOutputMode, OutputMode } from "../reporting/reportingTypes";
 
 export type ParsedCliCommand =
-  | { kind: "jira-issue"; issueKey: string; outputMode: OutputMode }
-  | { kind: "jira-analyze"; issueKey: string; outputMode: OutputMode }
-  | { kind: "github-pr-review"; input: string; outputMode: OutputMode }
-  | { kind: "github-pr-create"; issueKey: string; outputMode: OutputMode }
-  | { kind: "repo-investigate"; query: string; outputMode: OutputMode }
-  | { kind: "issue"; input: string; outputMode: OutputMode }
-  | { kind: "bug"; input: string; outputMode: OutputMode }
-  | { kind: "pr"; input: string; outputMode: OutputMode }
+  | { kind: "jira-issue"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "jira-analyze"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "github-pr-review"; input: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "github-pr-create"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "repo-investigate"; query: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "issue"; input: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "bug"; input: string; outputMode: OutputMode; repoRoot?: string }
+  | { kind: "pr"; input: string; outputMode: OutputMode; repoRoot?: string }
   | { kind: "unknown"; raw: string[] };
 
-function extractOutputMode(tokens: string[]): { outputMode: OutputMode; remaining: string[] } {
+function extractCliOptions(tokens: string[]): {
+  outputMode: OutputMode;
+  repoRoot?: string;
+  remaining: string[];
+} {
   const remaining: string[] = [];
   let requestedOutputMode: string | undefined;
+  let repoRoot: string | undefined;
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -34,10 +39,21 @@ function extractOutputMode(tokens: string[]): { outputMode: OutputMode; remainin
       continue;
     }
 
+    if (token === "--repo") {
+      repoRoot = tokens[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--repo=")) {
+      repoRoot = token.slice("--repo=".length);
+      continue;
+    }
+
     remaining.push(token);
   }
 
-  return { outputMode: normalizeOutputMode(requestedOutputMode), remaining };
+  return { outputMode: normalizeOutputMode(requestedOutputMode), repoRoot, remaining };
 }
 
 export function parseCliArgs(argv: string[]): ParsedCliCommand {
@@ -47,7 +63,7 @@ export function parseCliArgs(argv: string[]): ParsedCliCommand {
     return { kind: "unknown", raw: [] };
   }
 
-  const { outputMode, remaining } = extractOutputMode(afterNamespace);
+  const { outputMode, repoRoot, remaining } = extractCliOptions(afterNamespace);
 
   // Namespaced commands: ai jira <subcommand> <arg>
   if (namespace === "jira") {
@@ -55,11 +71,11 @@ export function parseCliArgs(argv: string[]): ParsedCliCommand {
     const arg = rest.join(" ").trim();
 
     if (subcommand === "issue" && arg) {
-      return { kind: "jira-issue", issueKey: arg, outputMode };
+      return { kind: "jira-issue", issueKey: arg, outputMode, repoRoot };
     }
 
     if (subcommand === "analyze" && arg) {
-      return { kind: "jira-analyze", issueKey: arg, outputMode };
+      return { kind: "jira-analyze", issueKey: arg, outputMode, repoRoot };
     }
 
     return { kind: "unknown", raw: [namespace, subcommand ?? "", ...rest] };
@@ -71,11 +87,11 @@ export function parseCliArgs(argv: string[]): ParsedCliCommand {
     const arg = rest.join(" ").trim();
 
     if (subA === "pr" && subB === "review" && arg) {
-      return { kind: "github-pr-review", input: arg, outputMode };
+      return { kind: "github-pr-review", input: arg, outputMode, repoRoot };
     }
 
     if (subA === "pr" && subB === "create" && arg) {
-      return { kind: "github-pr-create", issueKey: arg, outputMode };
+      return { kind: "github-pr-create", issueKey: arg, outputMode, repoRoot };
     }
 
     return { kind: "unknown", raw: [namespace, subA ?? "", subB ?? "", ...rest] };
@@ -87,7 +103,7 @@ export function parseCliArgs(argv: string[]): ParsedCliCommand {
     const query = rest.join(" ").trim();
 
     if (subcommand === "investigate" && query) {
-      return { kind: "repo-investigate", query, outputMode };
+      return { kind: "repo-investigate", query, outputMode, repoRoot };
     }
 
     return { kind: "unknown", raw: [namespace, subcommand ?? "", ...rest] };
@@ -97,15 +113,15 @@ export function parseCliArgs(argv: string[]): ParsedCliCommand {
   const input = remaining.join(" ").trim();
 
   if (namespace === "issue") {
-    return { kind: "issue", input, outputMode };
+    return { kind: "issue", input, outputMode, repoRoot };
   }
 
   if (namespace === "bug") {
-    return { kind: "bug", input, outputMode };
+    return { kind: "bug", input, outputMode, repoRoot };
   }
 
   if (namespace === "pr") {
-    return { kind: "pr", input, outputMode };
+    return { kind: "pr", input, outputMode, repoRoot };
   }
 
   return { kind: "unknown", raw: [namespace, ...remaining] };

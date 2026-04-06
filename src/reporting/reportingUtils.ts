@@ -191,6 +191,18 @@ export function extractResultSummary<T>(
   return truncateText(finalStep?.outputSummary, 200) || undefined;
 }
 
+export function getTargetRepository(
+  meta: WorkflowExecutionMeta,
+  runRecord: WorkflowRunRecord | null,
+): string | undefined {
+  if (meta.repoRoot) {
+    return meta.repoRoot;
+  }
+
+  const artifactValue = runRecord?.artifacts.repoRoot;
+  return typeof artifactValue === "string" ? artifactValue : undefined;
+}
+
 export function getHumanOutcomeLabel<T>(result: WorkflowResult<T>): string {
   return result.success ? "succeeded" : "failed";
 }

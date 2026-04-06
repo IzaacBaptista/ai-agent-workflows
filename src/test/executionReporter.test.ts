@@ -512,6 +512,29 @@ test("ExecutionReporter renders timeline mode and raw mode stays empty", () => {
   assert.match(ExecutionReporter.render({ result, runRecord }, "timeline"), /1\. plan/);
 });
 
+test("ExecutionReporter surfaces the target repository when repoRoot is present", () => {
+  const runRecord = createRunRecord({
+    artifacts: {
+      repoRoot: "/home/multiplier/Projects/srp",
+    },
+  });
+  const result: WorkflowResult<{ summary: string }> = {
+    success: false,
+    error: "LLM provider rate limit reached. Retry after approximately 4s.",
+    meta: createMeta({
+      status: "failed",
+      repoRoot: "/home/multiplier/Projects/srp",
+    }),
+  };
+
+  const summary = ExecutionReporter.render({ result, runRecord }, "summary");
+  const timeline = ExecutionReporter.render({ result, runRecord }, "timeline");
+
+  assert.match(summary, /Repository:/);
+  assert.match(summary, /\/home\/multiplier\/Projects\/srp/);
+  assert.match(timeline, /Repository: \/home\/multiplier\/Projects\/srp/);
+});
+
 test("parseCliArgs reads output mode and falls back to raw when invalid", () => {
   const summaryArgs = parseCliArgs([
     "node",
@@ -528,10 +551,24 @@ test("parseCliArgs reads output mode and falls back to raw when invalid", () => 
     "The planner keeps generating redundant search_code steps",
     "--output=invalid",
   ]);
+  const repoArgs = parseCliArgs([
+    "node",
+    "src/index.ts",
+    "jira",
+    "analyze",
+    "REL-5391",
+    "--repo",
+    "/tmp/srp",
+    "--output",
+    "summary",
+  ]);
 
   assert.ok(summaryArgs.kind === "bug");
   assert.equal(summaryArgs.outputMode, "timeline");
   assert.equal(summaryArgs.input, "WorkflowRuntime timeouts are not cleared");
   assert.ok(invalidArgs.kind === "issue");
   assert.equal(invalidArgs.outputMode, "raw");
+  assert.ok(repoArgs.kind === "jira-analyze");
+  assert.equal(repoArgs.repoRoot, "/tmp/srp");
+  assert.equal(repoArgs.outputMode, "summary");
 });

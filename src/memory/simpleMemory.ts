@@ -18,7 +18,6 @@ import { env } from "../config/env";
 
 const store = new Map<string, unknown>();
 const runStore = new Map<string, WorkflowRunRecord>();
-const runStorageDir = resolve(process.cwd(), env.RUN_STORAGE_DIR);
 
 interface CreateRunMemoryInput {
   runId: string;
@@ -54,12 +53,14 @@ function isWorkflowRunRecord(value: unknown): value is WorkflowRunRecord {
 }
 
 function ensureRunStorageDir(): void {
+  const runStorageDir = getRunStorageDir();
   if (!existsSync(runStorageDir)) {
     mkdirSync(runStorageDir, { recursive: true });
   }
 }
 
 function getRunFilePath(runId: string): string {
+  const runStorageDir = getRunStorageDir();
   return join(runStorageDir, `${runId}.json`);
 }
 
@@ -73,6 +74,7 @@ function persistRun(run: WorkflowRunRecord): void {
 }
 
 function enforcePersistedRunRetention(): void {
+  const runStorageDir = getRunStorageDir();
   ensureRunStorageDir();
 
   if (env.MAX_PERSISTED_RUNS <= 0) {
@@ -107,6 +109,7 @@ function enforcePersistedRunRetention(): void {
 }
 
 function loadPersistedRuns(): void {
+  const runStorageDir = getRunStorageDir();
   ensureRunStorageDir();
 
   for (const fileName of readdirSync(runStorageDir)) {
@@ -219,6 +222,7 @@ export function resetRunMemories(options: { clearPersistedRuns?: boolean } = {})
   runStore.clear();
 
   if (options.clearPersistedRuns) {
+    const runStorageDir = getRunStorageDir();
     ensureRunStorageDir();
 
     for (const fileName of readdirSync(runStorageDir)) {
@@ -236,3 +240,6 @@ export function resetRunMemories(options: { clearPersistedRuns?: boolean } = {})
 }
 
 loadPersistedRuns();
+function getRunStorageDir(): string {
+  return resolve(process.cwd(), env.RUN_STORAGE_DIR);
+}

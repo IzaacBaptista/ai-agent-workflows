@@ -9,6 +9,7 @@ const projectConfigSchema = z.object({
   jiraProjectKey: z.string().optional(),
   githubRepo: z.string().optional(),
   allowedPaths: z.array(z.string()).optional(),
+  searchPaths: z.array(z.string()).optional(),
   model: z.string().optional(),
   runStorageDir: z.string().optional(),
 });
@@ -56,12 +57,20 @@ export function loadProjectConfig(rootDir?: string): ProjectConfig {
   return {};
 }
 
-let _config: ProjectConfig | undefined;
+const projectConfigCache = new Map<string, ProjectConfig>();
 
-export function getProjectConfig(): ProjectConfig {
-  if (!_config) {
-    _config = loadProjectConfig();
+export function getProjectConfig(rootDir?: string): ProjectConfig {
+  const cacheKey = resolve(rootDir ?? process.cwd());
+  const cached = projectConfigCache.get(cacheKey);
+  if (cached) {
+    return cached;
   }
 
-  return _config;
+  const loaded = loadProjectConfig(cacheKey);
+  projectConfigCache.set(cacheKey, loaded);
+  return loaded;
+}
+
+export function resetProjectConfigCacheForTesting(): void {
+  projectConfigCache.clear();
 }

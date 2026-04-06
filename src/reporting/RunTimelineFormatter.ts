@@ -3,6 +3,7 @@ import { ExecutionReporterInput } from "./reportingTypes";
 import {
   extractFailureSummary,
   extractResultSummary,
+  getTargetRepository,
   getHumanOutcomeLabel,
   groupWorkflowSteps,
   truncateText,
@@ -34,6 +35,10 @@ export class RunTimelineFormatter {
   static format<T>(input: ExecutionReporterInput<T>): string {
     const { result, runRecord } = input;
     const lines: string[] = [`${result.meta.workflowName} — ${getHumanOutcomeLabel(result)}`, ""];
+    const repoRoot = getTargetRepository(result.meta, runRecord);
+    if (repoRoot) {
+      lines.push(`Repository: ${repoRoot}`, "");
+    }
     const groups = groupWorkflowSteps(runRecord);
 
     if (groups.length === 0) {

@@ -150,7 +150,7 @@ test("toolExecutor executes git_diff through the git tool runner", async () => {
 
 test("readFiles rejects paths outside allowed scope", () => {
   assert.throws(
-    () => readFiles(["README.md"]),
+    () => readFiles(["../README.md"]),
     /outside the allowed read scope/,
   );
 });

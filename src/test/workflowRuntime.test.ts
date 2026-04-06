@@ -392,7 +392,7 @@ test("WorkflowRuntime safely replans after a blocked read_file request", async (
         {
           type: "tool_call",
           toolName: "read_file",
-          input: { files: ["core/workflowRuntime.ts"] },
+          input: { files: ["../core/workflowRuntime.ts"] },
           reason: "Try reading a file outside the allowed scope",
         },
         {

@@ -63,6 +63,7 @@ import { isLlmProviderError } from "./llmClient";
 interface WorkflowRuntimeOptions {
   workflowName: string;
   input: string;
+  repoRoot?: string;
   policy?: Partial<WorkflowExecutionPolicy>;
 }
 
@@ -288,12 +289,14 @@ function shouldRetryStepError(error: unknown): boolean {
 export class WorkflowRuntime {
   readonly runId: string;
   readonly workflowName: string;
+  readonly repoRoot: string;
   readonly policy: WorkflowExecutionPolicy;
   private stepCount = 0;
 
   constructor(options: WorkflowRuntimeOptions) {
     this.workflowName = options.workflowName;
     this.runId = createRunId(options.workflowName);
+    this.repoRoot = options.repoRoot ?? process.cwd();
     this.policy = {
       ...DEFAULT_POLICY,
       ...options.policy,
@@ -306,6 +309,7 @@ export class WorkflowRuntime {
       policy: this.policy,
     });
 
+    this.saveArtifact("repoRoot", this.repoRoot);
     this.saveArtifact("runtimeStats", {
       toolCallCount: 0,
       editActionCount: 0,
@@ -386,6 +390,9 @@ export class WorkflowRuntime {
       runId: run.runId,
       workflowName: run.workflowName,
       status: run.status,
+      repoRoot:
+        (typeof run.artifacts.repoRoot === "string" ? run.artifacts.repoRoot : undefined) ??
+        this.repoRoot,
       stepCount: run.steps.length,
       critiqueCount: critiques.length,
       replanCount: replans.length,

@@ -143,6 +143,7 @@ export interface WorkflowExecutionMeta {
   runId: string;
   workflowName: string;
   status: WorkflowRunStatus;
+  repoRoot?: string;
   stepCount: number;
   critiqueCount: number;
   replanCount: number;

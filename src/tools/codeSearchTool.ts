@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync, statSync } from "fs";
-import { extname, join } from "path";
+import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { extname, join, resolve } from "path";
+import { getProjectConfig } from "../config/projectConfig";
 
 export interface CodeSearchResult {
   file: string;
@@ -7,14 +8,76 @@ export interface CodeSearchResult {
   snippet: string;
 }
 
-const SEARCHABLE_EXTENSIONS = new Set([".ts", ".js", ".md", ".json"]);
-const DEFAULT_SEARCH_ROOT = join(process.cwd(), "src");
+const SEARCHABLE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".md",
+  ".json",
+  ".php",
+  ".py",
+  ".rb",
+  ".java",
+  ".go",
+  ".rs",
+  ".kt",
+  ".swift",
+  ".yaml",
+  ".yml",
+  ".sql",
+  ".vue",
+  ".sh",
+]);
+const IGNORED_DIRECTORIES = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  "coverage",
+  "vendor",
+  "storage",
+]);
+const COMMON_SEARCH_ROOTS = ["src", "app", "lib", "server", "services", "packages", "modules"];
+
+function getSearchRoots(baseDir = process.cwd()): string[] {
+  const config = getProjectConfig(baseDir);
+  const configuredRoots =
+    config.searchPaths && config.searchPaths.length > 0
+      ? config.searchPaths
+      : config.allowedPaths && config.allowedPaths.length > 0
+        ? config.allowedPaths
+        : undefined;
+
+  if (configuredRoots) {
+    return configuredRoots
+      .map((entry) => resolve(baseDir, entry))
+      .filter((entry) => existsSync(entry) && statSync(entry).isDirectory());
+  }
+
+  const discoveredRoots = COMMON_SEARCH_ROOTS
+    .map((entry) => resolve(baseDir, entry))
+    .filter((entry) => existsSync(entry));
+
+  if (discoveredRoots.length > 0) {
+    return discoveredRoots;
+  }
+
+  return [resolve(baseDir)];
+}
 
 function collectFiles(directory: string): string[] {
   const entries = readdirSync(directory);
   const files: string[] = [];
 
   for (const entry of entries) {
+    if (IGNORED_DIRECTORIES.has(entry)) {
+      continue;
+    }
+
     const fullPath = join(directory, entry);
     const stats = statSync(fullPath);
 
@@ -43,7 +106,7 @@ export function searchCode(term: string, limit = 5): CodeSearchResult[] {
   }
 
   const normalizedTerm = term.toLowerCase();
-  const files = collectFiles(DEFAULT_SEARCH_ROOT);
+  const files = Array.from(new Set(getSearchRoots().flatMap((root) => collectFiles(root))));
   const results: CodeSearchResult[] = [];
 
   for (const file of files) {

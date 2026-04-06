@@ -1,7 +1,12 @@
 #!/usr/bin/env node
+import { existsSync, statSync } from "fs";
+import { homedir } from "os";
+import { resolve } from "path";
 import { parseCliArgs } from "./cli/parseCliArgs";
 import { WorkflowResult } from "./core/types";
 import { getRunMemory } from "./memory/simpleMemory";
+import { env } from "./config/env";
+import { loadProjectConfig } from "./config/projectConfig";
 import { ExecutionReporter } from "./reporting/ExecutionReporter";
 import { runIssueWorkflow } from "./workflows/issueWorkflow";
 import { runBugWorkflow } from "./workflows/bugWorkflow";
@@ -10,10 +15,11 @@ import { runJiraIssueWorkflow } from "./workflows/jiraIssueWorkflow";
 import { runJiraAnalyzeWorkflow } from "./workflows/jiraAnalyzeWorkflow";
 import { runPRCreateWorkflow } from "./workflows/prCreateWorkflow";
 import { runRepoInvestigateWorkflow } from "./workflows/repoInvestigateWorkflow";
+import { resetRunMemories } from "./memory/simpleMemory";
 
 function printUsage(): void {
   console.log(`
-Usage: ai <namespace> <subcommand> <arg> [--output raw|summary|timeline]
+Usage: ai <namespace> <subcommand> <arg> [--repo <path>] [--output raw|summary|timeline]
 
 Namespaced commands:
   jira issue <KEY>          Analyse a Jira issue (e.g. REL-123)
@@ -30,6 +36,7 @@ Flat aliases (backward-compatible):
 Examples:
   ai jira issue REL-123
   ai jira analyze REL-123
+  ai jira analyze REL-123 --repo ~/Projects/srp
   ai github pr review 42
   ai github pr create REL-123
   ai repo investigate "timeout not cleared in auth middleware"
@@ -38,6 +45,47 @@ Examples:
   ai pr "Refactored auth middleware and updated token validation"
   ai pr "Refactored auth middleware" --output summary
 `);
+}
+
+function resolveCliPath(value: string): string {
+  if (value === "~") {
+    return homedir();
+  }
+
+  if (value.startsWith("~/")) {
+    return resolve(homedir(), value.slice(2));
+  }
+
+  return resolve(value);
+}
+
+function applyRepoExecutionContext(repoRoot?: string): string | undefined {
+  if (!repoRoot) {
+    return undefined;
+  }
+
+  const resolvedRepoRoot = resolveCliPath(repoRoot);
+  if (!existsSync(resolvedRepoRoot) || !statSync(resolvedRepoRoot).isDirectory()) {
+    throw new Error(`Repository path does not exist or is not a directory: ${repoRoot}`);
+  }
+
+  const projectConfig = loadProjectConfig(resolvedRepoRoot);
+  if (projectConfig.model) {
+    env.MODEL = projectConfig.model;
+  }
+  if (projectConfig.runStorageDir) {
+    env.RUN_STORAGE_DIR = projectConfig.runStorageDir;
+  }
+  if (projectConfig.jiraBaseUrl) {
+    env.JIRA_BASE_URL = projectConfig.jiraBaseUrl;
+  }
+  if (projectConfig.githubRepo) {
+    env.GITHUB_REPO = projectConfig.githubRepo;
+  }
+
+  process.chdir(resolvedRepoRoot);
+  resetRunMemories();
+  return resolvedRepoRoot;
 }
 
 async function main(): Promise<void> {
@@ -50,6 +98,7 @@ async function main(): Promise<void> {
   }
 
   try {
+    applyRepoExecutionContext("repoRoot" in command ? command.repoRoot : undefined);
     let result: WorkflowResult<unknown>;
 
     if (command.kind === "issue") {

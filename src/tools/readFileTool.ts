@@ -7,30 +7,52 @@ export interface FileReadResult {
   content: string;
 }
 
-const ALLOWED_EXTENSIONS = new Set([".ts", ".js", ".json", ".md"]);
+const ALLOWED_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".md",
+  ".php",
+  ".py",
+  ".rb",
+  ".java",
+  ".go",
+  ".rs",
+  ".kt",
+  ".swift",
+  ".yaml",
+  ".yml",
+  ".sql",
+  ".vue",
+  ".sh",
+]);
 
-function getAllowedRoots(): string[] {
-  const config = getProjectConfig();
+function getAllowedRoots(baseDir = process.cwd()): string[] {
+  const config = getProjectConfig(baseDir);
 
   if (config.allowedPaths && config.allowedPaths.length > 0) {
-    return config.allowedPaths.map((p) => resolve(process.cwd(), p));
+    return config.allowedPaths.map((p) => resolve(baseDir, p));
   }
 
-  return [resolve(process.cwd(), "src")];
+  return [resolve(baseDir)];
 }
 
-function isAllowedPath(absolutePath: string): boolean {
-  const roots = getAllowedRoots();
+function isAllowedPath(absolutePath: string, baseDir = process.cwd()): boolean {
+  const roots = getAllowedRoots(baseDir);
   return roots.some(
     (root) => absolutePath === root || absolutePath.startsWith(`${root}/`),
   );
 }
 
-function getReadPathValidationError(file: string): string | undefined {
-  const absolutePath = resolve(file);
+function getReadPathValidationError(file: string, baseDir = process.cwd()): string | undefined {
+  const absolutePath = resolve(baseDir, file);
   const extension = extname(absolutePath);
 
-  if (!isAllowedPath(absolutePath)) {
+  if (!isAllowedPath(absolutePath, baseDir)) {
     return `File "${file}" is outside the allowed read scope`;
   }
 
@@ -45,11 +67,15 @@ function getReadPathValidationError(file: string): string | undefined {
   return undefined;
 }
 
-export function getReadFileValidationError(files: string[], maxFiles = 3): string | undefined {
+export function getReadFileValidationError(
+  files: string[],
+  maxFiles = 3,
+  baseDir = process.cwd(),
+): string | undefined {
   const uniqueFiles = Array.from(new Set(files)).slice(0, maxFiles);
 
   for (const file of uniqueFiles) {
-    const error = getReadPathValidationError(file);
+    const error = getReadPathValidationError(file, baseDir);
     if (error) {
       return error;
     }
@@ -58,8 +84,13 @@ export function getReadFileValidationError(files: string[], maxFiles = 3): strin
   return undefined;
 }
 
-export function readFiles(files: string[], maxFiles = 3, maxCharsPerFile = 1200): FileReadResult[] {
-  const validationError = getReadFileValidationError(files, maxFiles);
+export function readFiles(
+  files: string[],
+  maxFiles = 3,
+  maxCharsPerFile = 1200,
+  baseDir = process.cwd(),
+): FileReadResult[] {
+  const validationError = getReadFileValidationError(files, maxFiles, baseDir);
   if (validationError) {
     throw new Error(validationError);
   }
@@ -67,7 +98,7 @@ export function readFiles(files: string[], maxFiles = 3, maxCharsPerFile = 1200)
   const uniqueFiles = Array.from(new Set(files)).slice(0, maxFiles);
 
   return uniqueFiles.map((file) => {
-    const absolutePath = resolve(file);
+    const absolutePath = resolve(baseDir, file);
 
     const content = readFileSync(absolutePath, "utf-8");
     const trimmedContent =

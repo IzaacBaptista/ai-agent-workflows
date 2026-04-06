@@ -20,8 +20,8 @@ test("buildGitHubPRReviewInput formats PR fields into a string", () => {
   assert.match(input, /Repository: owner\/repo/);
   assert.match(input, /PR Number: 42/);
   assert.match(input, /Title: Fix authentication bug/);
-  assert.match(input, /Description: Resolves null pointer in auth middleware/);
-  assert.match(input, /Diff:/);
+  assert.match(input, /Description:\s*\nResolves null pointer in auth middleware/);
+  assert.match(input, /Patch excerpts:/);
   assert.match(input, /--- a\/src\/auth\.ts/);
 });
 

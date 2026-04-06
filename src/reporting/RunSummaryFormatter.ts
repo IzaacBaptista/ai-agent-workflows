@@ -4,6 +4,7 @@ import {
   buildHighLevelFlow,
   buildNarrativeWhatHappened,
   extractResultSummary,
+  getTargetRepository,
   getBehaviorSignal,
   getHumanOutcomeLabel,
   humanizeFailureSummary,
@@ -15,6 +16,10 @@ export class RunSummaryFormatter {
     const lines: string[] = [
       `${result.meta.workflowName} — ${getHumanOutcomeLabel(result)}`,
     ];
+    const repoRoot = getTargetRepository(result.meta as WorkflowExecutionMeta, runRecord);
+    if (repoRoot) {
+      lines.push("", "Repository:", `- ${repoRoot}`);
+    }
 
     const whatHappened = buildNarrativeWhatHappened(result, runRecord);
     if (whatHappened.length > 0) {
