@@ -9,6 +9,7 @@ import { fetchGitHubPR } from "./helpers/fetchGitHubPR";
 import { formatPRReviewComment } from "./helpers/formatPRReviewComment";
 import { postPRComment } from "./integrations/github/postPRComment";
 import { getAllRunMemories, getRunMemory } from "./memory/simpleMemory";
+import { buildLlmPreflightFailure } from "./workflows/workflowPreflight";
 
 const inputSchema = z.object({ input: z.string().min(1) });
 
@@ -106,6 +107,14 @@ export function createApp() {
     }
     try {
       const { repository, prNumber, githubToken } = parsed.data;
+      const preflightFailure = buildLlmPreflightFailure(
+        "PRReviewWorkflow",
+        `Repository: ${repository}\nPR Number: ${prNumber}`,
+      );
+      if (preflightFailure) {
+        res.status(429).json(preflightFailure);
+        return;
+      }
       const prDetails = await fetchGitHubPR(repository, prNumber, githubToken);
       const input = buildGitHubPRReviewInput(prDetails);
       const data = await runPRReviewWorkflow(input);
@@ -123,6 +132,14 @@ export function createApp() {
     }
     try {
       const { repository, prNumber, githubToken } = parsed.data;
+      const preflightFailure = buildLlmPreflightFailure(
+        "PRReviewWorkflow",
+        `Repository: ${repository}\nPR Number: ${prNumber}`,
+      );
+      if (preflightFailure) {
+        res.status(429).json(preflightFailure);
+        return;
+      }
       const prDetails = await fetchGitHubPR(repository, prNumber, githubToken);
       const input = buildGitHubPRReviewInput(prDetails);
       const result = await runPRReviewWorkflow(input);

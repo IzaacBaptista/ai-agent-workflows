@@ -1,15 +1,14 @@
+import { BugTriageAgent } from "../agents/bugTriageAgent";
 import { CriticAgent } from "../agents/criticAgent";
 import { PlannerAgent } from "../agents/plannerAgent";
-import { PRAgent } from "../agents/prAgent";
-import { PRTriageAgent } from "../agents/prTriageAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
+import { RepoInvestigateAgent } from "../agents/repoInvestigateAgent";
 import {
   AppliedCodePatchResult,
+  BugTriage,
   CommandExecutionResult,
-  GitDiffResult,
-  GitStatusResult,
-  PRReview,
-  PRTriage,
+  GitLogResult,
+  RepoInvestigationResult,
   RuntimeAction,
   WorkflowValidationError,
   WorkflowResult,
@@ -23,8 +22,7 @@ import {
   summarizeCommandResults,
   summarizeEvidenceOverview,
   summarizeFileReadResults,
-  summarizeGitDiffResult,
-  summarizeGitStatusResult,
+  summarizeGitLogResult,
   summarizePatchResults,
   summarizeRecentSteps,
   summarizeRemainingActions,
@@ -39,26 +37,22 @@ import {
 } from "../tools/loggingTool";
 import { buildLlmPreflightFailure } from "./workflowPreflight";
 
-function buildPRWorkflowContext(
-  diff: string,
-  triage: PRTriage | undefined,
+function buildRepoInvestigateWorkflowContext(
+  query: string,
+  triage: BugTriage | undefined,
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
   patchResults: AppliedCodePatchResult[] | undefined,
   commandResults: CommandExecutionResult[] | undefined,
-  gitStatusResult: GitStatusResult | undefined,
-  gitDiffResult: GitDiffResult | undefined,
+  gitLogResult: GitLogResult | undefined,
 ): string {
   return [
-    "Pull request input:",
-    diff,
+    `Investigation query: ${query}`,
     "",
     "Triage summary:",
     triage?.summary ?? "No triage available",
     "",
-    ...summarizeStringList("Review focus:", triage?.reviewFocus),
-    "",
-    ...summarizeStringList("Regression checks:", triage?.regressionChecks),
+    ...summarizeStringList("Initial hypotheses:", triage?.hypotheses),
     "",
     ...summarizeCodeSearchResults(codeSearchResults),
     "",
@@ -68,16 +62,14 @@ function buildPRWorkflowContext(
     "",
     ...summarizeCommandResults(commandResults),
     "",
-    ...summarizeGitStatusResult(gitStatusResult),
-    "",
-    ...summarizeGitDiffResult(gitDiffResult),
+    ...summarizeGitLogResult(gitLogResult),
   ].join("\n");
 }
 
-function buildPRCritiqueContext(diff: string, workflowContext: string): string {
+function buildRepoInvestigateCritiqueContext(query: string, workflowContext: string): string {
   return [
-    "Original input:",
-    diff,
+    "Original investigation query:",
+    query,
     "",
     "Analysis context:",
     workflowContext,
@@ -97,7 +89,7 @@ function buildReplanContext(
     | undefined;
 
   return [
-    "Original input:",
+    "Original investigation query:",
     originalInput,
     "",
     ...summarizeCompletedAction(completedAction),
@@ -113,32 +105,51 @@ function buildReplanContext(
     ...summarizeRemainingActions(remainingActions),
     "",
     "Guidance:",
-    "- If build/test evidence already supports a bounded review, prefer finalize over additional repository inspection when budget pressure rises.",
+    "- Prefer git_log to understand recent changes in relevant files before running code search.",
+    "- If repository evidence is already sufficient, prefer finalize over more search_code/read_file steps.",
   ].join("\n");
 }
 
-const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
-  workflowName: "PRReviewWorkflow",
-  triageAgentName: "PRTriageAgent",
-  finalAgentName: "PRAgent",
+const repoInvestigateWorkflowDefinition: WorkflowDefinition<BugTriage, RepoInvestigationResult> = {
+  workflowName: "RepoInvestigateWorkflow",
+  triageAgentName: "BugTriageAgent",
+  finalAgentName: "RepoInvestigateAgent",
   runPlanner: (input, memoryContext, availableTools, delegatableAgents) => {
     const agent = new PlannerAgent();
-    return agent.runForWorkflow("PRReviewWorkflow", input, memoryContext, availableTools, delegatableAgents);
+    return agent.runForWorkflow(
+      "RepoInvestigateWorkflow",
+      input,
+      memoryContext,
+      availableTools,
+      delegatableAgents,
+    );
   },
   runReplanner: (context, memoryContext, availableTools, delegatableAgents) => {
     const agent = new ReplannerAgent();
-    return agent.runForWorkflow("PRReviewWorkflow", context, memoryContext, availableTools, delegatableAgents);
+    return agent.runForWorkflow(
+      "RepoInvestigateWorkflow",
+      context,
+      memoryContext,
+      availableTools,
+      delegatableAgents,
+    );
   },
   runCritic: (context, candidateResult, workingMemory, memoryContext) => {
     const critic = new CriticAgent();
-    return critic.review("PRReviewWorkflow", context, candidateResult, workingMemory, memoryContext);
+    return critic.review(
+      "RepoInvestigateWorkflow",
+      context,
+      candidateResult,
+      workingMemory,
+      memoryContext,
+    );
   },
   runTriage: async (task, input) => {
-    const agent = new PRTriageAgent();
-    return agent.run([`Task:\n${task}`, "", "Code changes:", input].join("\n"));
+    const agent = new BugTriageAgent();
+    return agent.run([`Task:\n${task}`, "", "Investigation query:", input].join("\n"));
   },
   runFinal: async (task, context) => {
-    const agent = new PRAgent();
+    const agent = new RepoInvestigateAgent();
     return agent.run([`Task:\n${task}`, "", context].join("\n"));
   },
   buildFinalContext: (input, runtime, triage) => {
@@ -154,53 +165,54 @@ const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
     const commandResults = runtime.getRunRecord().artifacts.commandResults as
       | CommandExecutionResult[]
       | undefined;
-    const gitStatusResult = runtime.getRunRecord().artifacts.gitStatusResult as
-      | GitStatusResult
+    const gitLogResult = runtime.getRunRecord().artifacts.gitLogResult as
+      | GitLogResult
       | undefined;
-    const gitDiffResult = runtime.getRunRecord().artifacts.gitDiffResult as
-      | GitDiffResult
-      | undefined;
-    return buildPRWorkflowContext(
+    return buildRepoInvestigateWorkflowContext(
       input,
       triage,
       codeSearchResults,
       fileReadResults,
       patchResults,
       commandResults,
-      gitStatusResult,
-      gitDiffResult,
+      gitLogResult,
     );
   },
   buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
-    buildPRCritiqueContext(input, finalContext),
+    buildRepoInvestigateCritiqueContext(input, finalContext),
   buildReplanContext: (input, completedAction, runtime, remainingActions) =>
     buildReplanContext(input, completedAction, runtime, remainingActions),
-  summarizeTriage: (triage) => `reviewFocus=${triage.reviewFocus.length}`,
-  summarizeResult: (result) => `impacts=${result.impacts.length}`,
+  summarizeTriage: (triage) => `hypotheses=${triage.hypotheses.length}`,
+  summarizeResult: (result) => `relevantFiles=${result.relevantFiles.length}`,
 };
 
-export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<PRReview>> {
-  const preflightFailure = buildLlmPreflightFailure<PRReview>("PRReviewWorkflow", diff);
+export async function runRepoInvestigateWorkflow(
+  query: string,
+): Promise<WorkflowResult<RepoInvestigationResult>> {
+  const preflightFailure = buildLlmPreflightFailure<RepoInvestigationResult>(
+    "RepoInvestigateWorkflow",
+    query,
+  );
   if (preflightFailure) {
     return preflightFailure;
   }
 
-  const execution = startAgentExecution("PRReviewWorkflow", diff);
+  const execution = startAgentExecution("RepoInvestigateWorkflow", query);
   const runtime = new WorkflowRuntime({
-    workflowName: "PRReviewWorkflow",
-    input: diff,
+    workflowName: "RepoInvestigateWorkflow",
+    input: query,
   });
 
   try {
-    const result = await runtime.runActionQueue(prWorkflowDefinition, diff);
+    const result = await runtime.runActionQueue(repoInvestigateWorkflowDefinition, query);
     runtime.complete();
-    logAgentExecutionSuccess(execution, diff, result);
+    logAgentExecutionSuccess(execution, query, result);
     return { success: true, data: result, meta: runtime.getMeta() };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     runtime.fail(message);
-    logAgentExecutionFailure(execution, diff, error);
-    console.error("[PRReviewWorkflow] Failed:", message);
+    logAgentExecutionFailure(execution, query, error);
+    console.error("[RepoInvestigateWorkflow] Failed:", message);
     return { success: false, error: message, meta: runtime.getMeta() };
   }
 }

@@ -286,6 +286,36 @@ test("WorkflowRuntime fails timed out step and records failure", async () => {
   assert.match(runRecord.steps[0].error ?? "", /timed out/);
 });
 
+test("WorkflowRuntime does not retry a timed out step even when retries remain", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "TimeoutNoRetryWorkflow",
+    input: "timeout input",
+    policy: {
+      maxSteps: 5,
+      maxRetriesPerStep: 2,
+      timeoutMs: 10,
+    },
+  });
+
+  let attemptCount = 0;
+
+  await assert.rejects(
+    () =>
+      runtime.executeStep("plan", async () => {
+        attemptCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return "too slow";
+      }),
+    /timed out/,
+  );
+
+  const runRecord = runtime.getRunRecord();
+  assert.equal(attemptCount, 1);
+  assert.equal(runRecord.steps.length, 1);
+  assert.equal(runRecord.steps[0]?.attempt, 1);
+  assert.match(runRecord.steps[0]?.error ?? "", /timed out/);
+});
+
 test("WorkflowRuntime safely replans after an invalid tool request", async () => {
   const runtime = new WorkflowRuntime({
     workflowName: "RuntimeInvalidToolWorkflow",

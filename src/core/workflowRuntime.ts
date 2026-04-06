@@ -1,3 +1,4 @@
+import { env } from "../config/env";
 import { getDelegatableAgentNames, isRegisteredAgentName, runDelegatedAgent } from "../agents/agentRegistry";
 import { CoderAgent } from "../agents/coderAgent";
 import { buildRelevantMemoryContext } from "../memory/runMemoryStore";
@@ -152,7 +153,7 @@ export interface WorkflowDefinition<TTriage, TResult> {
 const DEFAULT_POLICY: WorkflowExecutionPolicy = {
   maxSteps: 10,
   maxRetriesPerStep: 1,
-  timeoutMs: 60_000,
+  timeoutMs: env.STEP_TIMEOUT_MS,
   maxConsecutiveNoProgress: 1,
   maxToolCalls: 4,
   maxRepeatedIdenticalToolCalls: 1,
@@ -273,8 +274,15 @@ function getUnexpectedChangedFiles(changedFiles: string[], requestedFiles: strin
   return changedFiles.filter((file) => !requested.has(file.trim()));
 }
 
+class WorkflowStepTimeoutError extends Error {
+  constructor(stepName: string) {
+    super(`Step "${stepName}" timed out`);
+    this.name = "WorkflowStepTimeoutError";
+  }
+}
+
 function shouldRetryStepError(error: unknown): boolean {
-  return !isLlmProviderError(error);
+  return !isLlmProviderError(error) && !(error instanceof WorkflowStepTimeoutError);
 }
 
 export class WorkflowRuntime {
@@ -431,6 +439,7 @@ export class WorkflowRuntime {
         artifacts.patchResults ||
         artifacts.gitStatusResult ||
         artifacts.gitDiffResult ||
+        artifacts.gitLogResult ||
         artifacts.externalApiResult,
     );
   }
@@ -440,7 +449,7 @@ export class WorkflowRuntime {
       return false;
     }
 
-    if (!["search_code", "read_file", "git_status", "git_diff"].includes(action.toolName)) {
+    if (!["search_code", "read_file", "git_status", "git_diff", "git_log"].includes(action.toolName)) {
       return false;
     }
 
@@ -540,7 +549,7 @@ export class WorkflowRuntime {
       try {
         const timeoutPromise = new Promise<T>((_, reject) => {
           timeoutHandle = setTimeout(
-            () => reject(new Error(`Step "${name}" timed out`)),
+            () => reject(new WorkflowStepTimeoutError(name)),
             this.policy.timeoutMs,
           );
         });
@@ -783,6 +792,8 @@ export class WorkflowRuntime {
       this.saveArtifact("gitStatusResult", result.data);
     } else if (toolName === "git_diff") {
       this.saveArtifact("gitDiffResult", result.data);
+    } else if (toolName === "git_log") {
+      this.saveArtifact("gitLogResult", result.data);
     } else {
       this.saveArtifact("externalApiResult", result.data);
     }

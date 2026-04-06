@@ -3,10 +3,13 @@ import { BugTriageAgent } from "./bugTriageAgent";
 import { CriticAgent } from "./criticAgent";
 import { IssueAgent } from "./issueAgent";
 import { IssueTriageAgent } from "./issueTriageAgent";
+import { JiraAnalyzeAgent } from "./jiraAnalyzeAgent";
 import { PlannerAgent } from "./plannerAgent";
 import { PRAgent } from "./prAgent";
+import { PRCreateAgent } from "./prCreateAgent";
 import { PRTriageAgent } from "./prTriageAgent";
 import { ReplannerAgent } from "./replannerAgent";
+import { RepoInvestigateAgent } from "./repoInvestigateAgent";
 import { ReviewerAgent } from "./reviewerAgent";
 import { REGISTERED_AGENT_NAMES, RegisteredAgentName } from "../core/types";
 
@@ -27,6 +30,9 @@ const agentFactories: Record<RegisteredAgentName, AgentFactory> = {
   IssueAgent: () => new IssueAgent(),
   BugAgent: () => new BugAgent(),
   PRAgent: () => new PRAgent(),
+  JiraAnalyzeAgent: () => new JiraAnalyzeAgent(),
+  PRCreateAgent: () => new PRCreateAgent(),
+  RepoInvestigateAgent: () => new RepoInvestigateAgent(),
 };
 
 export function getDelegatableAgentNames(): RegisteredAgentName[] {

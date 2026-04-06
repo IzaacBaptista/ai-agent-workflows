@@ -1,20 +1,23 @@
 import { CriticAgent } from "../agents/criticAgent";
-import { PlannerAgent } from "../agents/plannerAgent";
-import { PRAgent } from "../agents/prAgent";
+import { PRCreateAgent } from "../agents/prCreateAgent";
 import { PRTriageAgent } from "../agents/prTriageAgent";
+import { PlannerAgent } from "../agents/plannerAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
+import { env } from "../config/env";
 import {
   AppliedCodePatchResult,
   CommandExecutionResult,
   GitDiffResult,
   GitStatusResult,
-  PRReview,
+  PRCreatePlan,
+  PRCreateResult,
   PRTriage,
   RuntimeAction,
   WorkflowValidationError,
   WorkflowResult,
 } from "../core/types";
 import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
+import { createPR } from "../integrations/github/createPR";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
 import {
@@ -37,10 +40,11 @@ import {
   logAgentExecutionSuccess,
   startAgentExecution,
 } from "../tools/loggingTool";
+import { runJiraAnalyzeWorkflow } from "./jiraAnalyzeWorkflow";
 import { buildLlmPreflightFailure } from "./workflowPreflight";
 
-function buildPRWorkflowContext(
-  diff: string,
+function buildPRCreateWorkflowContext(
+  input: string,
   triage: PRTriage | undefined,
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
@@ -50,8 +54,8 @@ function buildPRWorkflowContext(
   gitDiffResult: GitDiffResult | undefined,
 ): string {
   return [
-    "Pull request input:",
-    diff,
+    "PR creation context (from Jira analysis):",
+    input,
     "",
     "Triage summary:",
     triage?.summary ?? "No triage available",
@@ -74,10 +78,10 @@ function buildPRWorkflowContext(
   ].join("\n");
 }
 
-function buildPRCritiqueContext(diff: string, workflowContext: string): string {
+function buildPRCreateCritiqueContext(input: string, workflowContext: string): string {
   return [
-    "Original input:",
-    diff,
+    "Original context:",
+    input,
     "",
     "Analysis context:",
     workflowContext,
@@ -97,7 +101,7 @@ function buildReplanContext(
     | undefined;
 
   return [
-    "Original input:",
+    "Original context:",
     originalInput,
     "",
     ...summarizeCompletedAction(completedAction),
@@ -113,32 +117,50 @@ function buildReplanContext(
     ...summarizeRemainingActions(remainingActions),
     "",
     "Guidance:",
-    "- If build/test evidence already supports a bounded review, prefer finalize over additional repository inspection when budget pressure rises.",
+    "- If git context already shows the current branch and diff, prefer finalize over additional search steps.",
   ].join("\n");
 }
 
-const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
-  workflowName: "PRReviewWorkflow",
+const prCreateWorkflowDefinition: WorkflowDefinition<PRTriage, PRCreatePlan> = {
+  workflowName: "PRCreateWorkflow",
   triageAgentName: "PRTriageAgent",
-  finalAgentName: "PRAgent",
+  finalAgentName: "PRCreateAgent",
   runPlanner: (input, memoryContext, availableTools, delegatableAgents) => {
     const agent = new PlannerAgent();
-    return agent.runForWorkflow("PRReviewWorkflow", input, memoryContext, availableTools, delegatableAgents);
+    return agent.runForWorkflow(
+      "PRCreateWorkflow",
+      input,
+      memoryContext,
+      availableTools,
+      delegatableAgents,
+    );
   },
   runReplanner: (context, memoryContext, availableTools, delegatableAgents) => {
     const agent = new ReplannerAgent();
-    return agent.runForWorkflow("PRReviewWorkflow", context, memoryContext, availableTools, delegatableAgents);
+    return agent.runForWorkflow(
+      "PRCreateWorkflow",
+      context,
+      memoryContext,
+      availableTools,
+      delegatableAgents,
+    );
   },
   runCritic: (context, candidateResult, workingMemory, memoryContext) => {
     const critic = new CriticAgent();
-    return critic.review("PRReviewWorkflow", context, candidateResult, workingMemory, memoryContext);
+    return critic.review(
+      "PRCreateWorkflow",
+      context,
+      candidateResult,
+      workingMemory,
+      memoryContext,
+    );
   },
   runTriage: async (task, input) => {
     const agent = new PRTriageAgent();
-    return agent.run([`Task:\n${task}`, "", "Code changes:", input].join("\n"));
+    return agent.run([`Task:\n${task}`, "", "Context:", input].join("\n"));
   },
   runFinal: async (task, context) => {
-    const agent = new PRAgent();
+    const agent = new PRCreateAgent();
     return agent.run([`Task:\n${task}`, "", context].join("\n"));
   },
   buildFinalContext: (input, runtime, triage) => {
@@ -160,7 +182,7 @@ const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
     const gitDiffResult = runtime.getRunRecord().artifacts.gitDiffResult as
       | GitDiffResult
       | undefined;
-    return buildPRWorkflowContext(
+    return buildPRCreateWorkflowContext(
       input,
       triage,
       codeSearchResults,
@@ -172,35 +194,118 @@ const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
     );
   },
   buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
-    buildPRCritiqueContext(input, finalContext),
+    buildPRCreateCritiqueContext(input, finalContext),
   buildReplanContext: (input, completedAction, runtime, remainingActions) =>
     buildReplanContext(input, completedAction, runtime, remainingActions),
   summarizeTriage: (triage) => `reviewFocus=${triage.reviewFocus.length}`,
-  summarizeResult: (result) => `impacts=${result.impacts.length}`,
+  summarizeResult: (result) => `title=${result.title.slice(0, 40)}`,
 };
 
-export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<PRReview>> {
-  const preflightFailure = buildLlmPreflightFailure<PRReview>("PRReviewWorkflow", diff);
-  if (preflightFailure) {
-    return preflightFailure;
-  }
-
-  const execution = startAgentExecution("PRReviewWorkflow", diff);
+async function runPRCreateAgenticLoop(
+  input: string,
+): Promise<WorkflowResult<PRCreatePlan>> {
+  const execution = startAgentExecution("PRCreateWorkflow", input);
   const runtime = new WorkflowRuntime({
-    workflowName: "PRReviewWorkflow",
-    input: diff,
+    workflowName: "PRCreateWorkflow",
+    input,
   });
 
   try {
-    const result = await runtime.runActionQueue(prWorkflowDefinition, diff);
+    const result = await runtime.runActionQueue(prCreateWorkflowDefinition, input);
     runtime.complete();
-    logAgentExecutionSuccess(execution, diff, result);
+    logAgentExecutionSuccess(execution, input, result);
     return { success: true, data: result, meta: runtime.getMeta() };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     runtime.fail(message);
-    logAgentExecutionFailure(execution, diff, error);
-    console.error("[PRReviewWorkflow] Failed:", message);
+    logAgentExecutionFailure(execution, input, error);
+    console.error("[PRCreateWorkflow] Failed:", message);
     return { success: false, error: message, meta: runtime.getMeta() };
   }
+}
+
+export async function runPRCreateWorkflow(
+  issueKey: string,
+): Promise<WorkflowResult<PRCreateResult>> {
+  const preflightFailure = buildLlmPreflightFailure<PRCreateResult>(
+    "PRCreateWorkflow",
+    `Create GitHub PR from Jira issue: ${issueKey}`,
+    { jiraIssueKey: issueKey },
+  );
+  if (preflightFailure) {
+    return preflightFailure;
+  }
+
+  const analyzeResult = await runJiraAnalyzeWorkflow(issueKey);
+
+  if (!analyzeResult.success) {
+    return {
+      success: false,
+      error: analyzeResult.error,
+      meta: { ...analyzeResult.meta },
+    };
+  }
+
+  const analysis = analyzeResult.data;
+  const input = [
+    `Jira Issue: ${issueKey}`,
+    `Suggested PR Title: ${analysis.suggestedPRTitle}`,
+    `Suggested Branch: ${analysis.suggestedBranchName}`,
+    "",
+    "Implementation Plan:",
+    ...analysis.implementationPlan.map((step) => `- ${step}`),
+    "",
+    "Acceptance Criteria:",
+    ...analysis.acceptanceCriteria.map((c) => `- ${c}`),
+    "",
+    "Risks:",
+    ...analysis.risks.map((r) => `- ${r}`),
+    "",
+    "Test Scenarios:",
+    ...analysis.testScenarios.map((s) => `- ${s}`),
+    "",
+    `Summary: ${analysis.summary}`,
+  ].join("\n");
+
+  const planResult = await runPRCreateAgenticLoop(input);
+
+  if (!planResult.success) {
+    return {
+      success: false,
+      error: planResult.error,
+      meta: { ...planResult.meta, jiraIssueKey: issueKey },
+    };
+  }
+
+  const plan = planResult.data;
+  let prUrl: string | undefined;
+  let prNumber: number | undefined;
+
+  if (env.GITHUB_TOKEN && env.GITHUB_REPO) {
+    const repoParts = env.GITHUB_REPO.split("/");
+    if (repoParts.length === 2 && repoParts[0] && repoParts[1]) {
+      try {
+        const created = await createPR({
+          owner: repoParts[0],
+          repo: repoParts[1],
+          title: plan.title,
+          body: plan.description,
+          head: plan.suggestedBranchName,
+          base: "main",
+          githubToken: env.GITHUB_TOKEN,
+        });
+        prUrl = created.prUrl;
+        prNumber = created.prNumber;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[PRCreateWorkflow] GitHub PR creation failed:", message);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    data: { ...plan, prUrl, prNumber },
+    meta: { ...planResult.meta, jiraIssueKey: issueKey },
+  };
 }

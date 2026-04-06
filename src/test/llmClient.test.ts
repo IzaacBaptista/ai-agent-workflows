@@ -283,6 +283,86 @@ test("callLLM wraps a final 429 with an actionable provider error", async () => 
   }
 });
 
+test("callLLM sends the configured request timeout to the provider", async () => {
+  const originalTimeoutMs = env.LLM_REQUEST_TIMEOUT_MS;
+  let seenTimeoutMs = 0;
+
+  env.LLM_REQUEST_TIMEOUT_MS = 4321;
+
+  setLlmTransportForTesting(async (_url, _body, config) => {
+    seenTimeoutMs = config.timeout;
+    return {
+      data: {
+        output_text: JSON.stringify({ ok: true }),
+      },
+    };
+  });
+  setLlmSleepForTesting(async () => undefined);
+  setLlmCircuitStateStoreForTesting({
+    read: () => undefined,
+    write: () => undefined,
+    clear: () => undefined,
+  });
+
+  try {
+    const response = await callLLM("capture timeout");
+
+    assert.deepEqual(response, {
+      output_text: JSON.stringify({ ok: true }),
+    });
+    assert.equal(seenTimeoutMs, 4321);
+  } finally {
+    env.LLM_REQUEST_TIMEOUT_MS = originalTimeoutMs;
+    setLlmTransportForTesting();
+    setLlmSleepForTesting();
+    setLlmCircuitStateStoreForTesting();
+  }
+});
+
+test("callLLM surfaces request timeouts with an explicit timeout message", async () => {
+  const originalTimeoutMs = env.LLM_REQUEST_TIMEOUT_MS;
+  const originalMaxRetries = env.LLM_MAX_RETRIES;
+
+  env.LLM_REQUEST_TIMEOUT_MS = 15000;
+  env.LLM_MAX_RETRIES = 0;
+
+  setLlmTransportForTesting(async () => {
+    const error = new Error("timeout of 15000ms exceeded") as Error & { code?: string };
+    error.code = "ECONNABORTED";
+    throw error;
+  });
+  setLlmSleepForTesting(async () => undefined);
+  setLlmCircuitStateStoreForTesting({
+    read: () => undefined,
+    write: () => undefined,
+    clear: () => undefined,
+  });
+
+  try {
+    await assert.rejects(
+      async () => {
+        try {
+          await callLLM("timeout request");
+        } catch (error) {
+          assert.equal(isLlmProviderError(error), true);
+          assert.match(
+            error instanceof Error ? error.message : String(error),
+            /timed out after approximately 15s/i,
+          );
+          throw error;
+        }
+      },
+      /timed out after approximately 15s/i,
+    );
+  } finally {
+    env.LLM_REQUEST_TIMEOUT_MS = originalTimeoutMs;
+    env.LLM_MAX_RETRIES = originalMaxRetries;
+    setLlmTransportForTesting();
+    setLlmSleepForTesting();
+    setLlmCircuitStateStoreForTesting();
+  }
+});
+
 test("callLLM waits for a busy local request gate before calling the provider", async () => {
   const tempRunDir = mkdtempSync(join(tmpdir(), "ai-agent-workflows-llm-gate-"));
   const originalRunStorageDir = env.RUN_STORAGE_DIR;

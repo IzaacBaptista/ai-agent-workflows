@@ -1,18 +1,21 @@
 import { CriticAgent } from "../agents/criticAgent";
-import { IssueAgent } from "../agents/issueAgent";
 import { IssueTriageAgent } from "../agents/issueTriageAgent";
+import { JiraAnalyzeAgent } from "../agents/jiraAnalyzeAgent";
 import { PlannerAgent } from "../agents/plannerAgent";
 import { ReplannerAgent } from "../agents/replannerAgent";
+import { env } from "../config/env";
 import {
   AppliedCodePatchResult,
   CommandExecutionResult,
-  IssueAnalysis,
   IssueTriage,
+  JiraAnalysis,
   RuntimeAction,
   WorkflowValidationError,
   WorkflowResult,
 } from "../core/types";
 import { WorkflowDefinition, WorkflowRuntime } from "../core/workflowRuntime";
+import { fetchJiraIssue } from "../integrations/jira/fetchJiraIssue";
+import { formatJiraIssue } from "../integrations/jira/formatJiraIssue";
 import { CodeSearchResult } from "../tools/codeSearchTool";
 import { FileReadResult } from "../tools/readFileTool";
 import {
@@ -35,8 +38,8 @@ import {
 } from "../tools/loggingTool";
 import { buildLlmPreflightFailure } from "./workflowPreflight";
 
-function buildIssueWorkflowContext(
-  issue: string,
+function buildJiraAnalyzeWorkflowContext(
+  input: string,
   triage: IssueTriage | undefined,
   codeSearchResults: Record<string, CodeSearchResult[]> | undefined,
   fileReadResults: FileReadResult[] | undefined,
@@ -44,8 +47,8 @@ function buildIssueWorkflowContext(
   commandResults: CommandExecutionResult[] | undefined,
 ): string {
   return [
-    "Issue input:",
-    issue,
+    "Jira issue context:",
+    input,
     "",
     "Triage summary:",
     triage?.summary ?? "No triage available",
@@ -64,10 +67,10 @@ function buildIssueWorkflowContext(
   ].join("\n");
 }
 
-function buildIssueCritiqueContext(issue: string, workflowContext: string): string {
+function buildJiraAnalyzeCritiqueContext(input: string, workflowContext: string): string {
   return [
-    "Original input:",
-    issue,
+    "Original Jira issue:",
+    input,
     "",
     "Analysis context:",
     workflowContext,
@@ -87,7 +90,7 @@ function buildReplanContext(
     | undefined;
 
   return [
-    "Original input:",
+    "Original Jira issue:",
     originalInput,
     "",
     ...summarizeCompletedAction(completedAction),
@@ -107,97 +110,46 @@ function buildReplanContext(
   ].join("\n");
 }
 
-const REPO_LOCAL_PHRASES = [
-  "this repo",
-  "this repository",
-  "this codebase",
-  "this project",
-  "repo-local",
-  "repository-local",
-];
-const REPO_LOCAL_IDENTIFIERS = [
-  "WorkflowRuntime",
-  "PlannerAgent",
-  "ReplannerAgent",
-  "CriticAgent",
-  "IssueWorkflow",
-  "BugWorkflow",
-  "PRReviewWorkflow",
-];
-
-function isClearlyRepoLocalIssue(issue: string): boolean {
-  const normalized = issue.toLowerCase();
-
-  if (REPO_LOCAL_PHRASES.some((phrase) => normalized.includes(phrase))) {
-    return true;
-  }
-
-  if (/\bsrc\//i.test(issue) || /\bpackage\.json\b/i.test(issue) || /\breadme\b/i.test(issue)) {
-    return true;
-  }
-
-  if (/\b[a-z0-9_./-]+\.(?:ts|js|md|json)\b/i.test(issue)) {
-    return true;
-  }
-
-  return REPO_LOCAL_IDENTIFIERS.some((identifier) => normalized.includes(identifier.toLowerCase()));
-}
-
-function hasSuccessfulIssueCodeEvidence(runtime: WorkflowRuntime): boolean {
-  const toolCalls = runtime.getRunRecord().artifacts.toolCalls as
-    | Array<{ toolName: string; result?: unknown }>
-    | undefined;
-
-  return (toolCalls ?? []).some(
-    (record) =>
-      (record.toolName === "search_code" || record.toolName === "read_file") && record.result != null,
-  );
-}
-
-function extractIssueSearchTerms(issue: string): string[] {
-  const identifierTerms = REPO_LOCAL_IDENTIFIERS.filter((identifier) =>
-    issue.toLowerCase().includes(identifier.toLowerCase()),
-  );
-  const fileTerms = Array.from(
-    new Set(
-      Array.from(
-        issue.matchAll(/\b(?:src\/[A-Za-z0-9_./-]+|package\.json|README|[A-Za-z0-9_-]+\.(?:ts|js|md|json))\b/g),
-      ).map((match) => match[0]),
-    ),
-  );
-  const genericTerms = Array.from(
-    new Set(
-      Array.from(issue.matchAll(/\b[A-Za-z][A-Za-z0-9_]{4,}\b/g))
-        .map((match) => match[0])
-        .filter((term) => !REPO_LOCAL_PHRASES.includes(term.toLowerCase())),
-    ),
-  );
-
-  return [...identifierTerms, ...fileTerms, ...genericTerms].slice(0, 3);
-}
-
-const issueWorkflowDefinition: WorkflowDefinition<IssueTriage, IssueAnalysis> = {
-  workflowName: "IssueWorkflow",
+const jiraAnalyzeWorkflowDefinition: WorkflowDefinition<IssueTriage, JiraAnalysis> = {
+  workflowName: "JiraAnalyzeWorkflow",
   triageAgentName: "IssueTriageAgent",
-  finalAgentName: "IssueAgent",
+  finalAgentName: "JiraAnalyzeAgent",
   runPlanner: (input, memoryContext, availableTools, delegatableAgents) => {
     const agent = new PlannerAgent();
-    return agent.runForWorkflow("IssueWorkflow", input, memoryContext, availableTools, delegatableAgents);
+    return agent.runForWorkflow(
+      "JiraAnalyzeWorkflow",
+      input,
+      memoryContext,
+      availableTools,
+      delegatableAgents,
+    );
   },
   runReplanner: (context, memoryContext, availableTools, delegatableAgents) => {
     const agent = new ReplannerAgent();
-    return agent.runForWorkflow("IssueWorkflow", context, memoryContext, availableTools, delegatableAgents);
+    return agent.runForWorkflow(
+      "JiraAnalyzeWorkflow",
+      context,
+      memoryContext,
+      availableTools,
+      delegatableAgents,
+    );
   },
   runCritic: (context, candidateResult, workingMemory, memoryContext) => {
     const critic = new CriticAgent();
-    return critic.review("IssueWorkflow", context, candidateResult, workingMemory, memoryContext);
+    return critic.review(
+      "JiraAnalyzeWorkflow",
+      context,
+      candidateResult,
+      workingMemory,
+      memoryContext,
+    );
   },
   runTriage: async (task, input) => {
     const agent = new IssueTriageAgent();
-    return agent.run([`Task:\n${task}`, "", "Issue:", input].join("\n"));
+    return agent.run([`Task:\n${task}`, "", "Jira issue:", input].join("\n"));
   },
   runFinal: async (task, context) => {
-    const agent = new IssueAgent();
+    const agent = new JiraAnalyzeAgent();
     return agent.run([`Task:\n${task}`, "", context].join("\n"));
   },
   buildFinalContext: (input, runtime, triage) => {
@@ -213,7 +165,7 @@ const issueWorkflowDefinition: WorkflowDefinition<IssueTriage, IssueAnalysis> = 
     const commandResults = runtime.getRunRecord().artifacts.commandResults as
       | CommandExecutionResult[]
       | undefined;
-    return buildIssueWorkflowContext(
+    return buildJiraAnalyzeWorkflowContext(
       input,
       triage,
       codeSearchResults,
@@ -223,62 +175,57 @@ const issueWorkflowDefinition: WorkflowDefinition<IssueTriage, IssueAnalysis> = 
     );
   },
   buildCritiqueContext: (input, _runtime, _candidateResult, finalContext) =>
-    buildIssueCritiqueContext(input, finalContext),
+    buildJiraAnalyzeCritiqueContext(input, finalContext),
   buildReplanContext: (input, completedAction, runtime, remainingActions) =>
     buildReplanContext(input, completedAction, runtime, remainingActions),
-  beforeFinalize: (input, runtime, state, action) => {
-    if (typeof runtime.getRunRecord().artifacts.forcedFinalAnalysisReason === "string") {
-      return null;
-    }
-
-    if (!isClearlyRepoLocalIssue(input) || hasSuccessfulIssueCodeEvidence(runtime)) {
-      return null;
-    }
-
-    const searchTerms =
-      state.triage?.codeSearchTerms?.slice(0, 3).filter((term) => term.trim().length > 0) ??
-      [];
-    const recoveryTerms = searchTerms.length > 0 ? searchTerms : extractIssueSearchTerms(input);
-
-    return {
-      reason: "Repo-local issues require at least one code-inspection step before finalization.",
-      recoveryActions: [
-        {
-          type: "tool_call",
-          toolName: "search_code",
-          input: { terms: recoveryTerms.length > 0 ? recoveryTerms : ["WorkflowRuntime"] },
-          reason: "Need at least one repository code-inspection step before finalizing a repo-local issue",
-        },
-        action,
-      ],
-    };
-  },
   summarizeTriage: (triage) => `investigationAreas=${triage.investigationAreas.length}`,
-  summarizeResult: (result) => `questions=${result.questions.length}`,
+  summarizeResult: (result) => `implementationPlan=${result.implementationPlan.length}`,
 };
 
-export async function runIssueWorkflow(issue: string): Promise<WorkflowResult<IssueAnalysis>> {
-  const preflightFailure = buildLlmPreflightFailure<IssueAnalysis>("IssueWorkflow", issue);
+export async function runJiraAnalyzeWorkflow(
+  issueKey: string,
+): Promise<WorkflowResult<JiraAnalysis>> {
+  const preflightFailure = buildLlmPreflightFailure<JiraAnalysis>(
+    "JiraAnalyzeWorkflow",
+    `Jira issue key: ${issueKey}`,
+    { jiraIssueKey: issueKey },
+  );
   if (preflightFailure) {
     return preflightFailure;
   }
 
-  const execution = startAgentExecution("IssueWorkflow", issue);
+  const issue = await fetchJiraIssue(issueKey, {
+    baseUrl: env.JIRA_BASE_URL,
+    email: env.JIRA_EMAIL,
+    apiToken: env.JIRA_API_TOKEN,
+  });
+
+  const input = formatJiraIssue(issue);
+
+  const execution = startAgentExecution("JiraAnalyzeWorkflow", input);
   const runtime = new WorkflowRuntime({
-    workflowName: "IssueWorkflow",
-    input: issue,
+    workflowName: "JiraAnalyzeWorkflow",
+    input,
   });
 
   try {
-    const result = await runtime.runActionQueue(issueWorkflowDefinition, issue);
+    const result = await runtime.runActionQueue(jiraAnalyzeWorkflowDefinition, input);
     runtime.complete();
-    logAgentExecutionSuccess(execution, issue, result);
-    return { success: true, data: result, meta: runtime.getMeta() };
+    logAgentExecutionSuccess(execution, input, result);
+    return {
+      success: true,
+      data: result,
+      meta: { ...runtime.getMeta(), jiraIssueKey: issueKey },
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     runtime.fail(message);
-    logAgentExecutionFailure(execution, issue, error);
-    console.error("[IssueWorkflow] Failed:", message);
-    return { success: false, error: message, meta: runtime.getMeta() };
+    logAgentExecutionFailure(execution, input, error);
+    console.error("[JiraAnalyzeWorkflow] Failed:", message);
+    return {
+      success: false,
+      error: message,
+      meta: { ...runtime.getMeta(), jiraIssueKey: issueKey },
+    };
   }
 }

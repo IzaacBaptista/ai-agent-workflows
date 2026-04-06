@@ -2,12 +2,15 @@
   "name": "ai-agent-workflows",
   "version": "1.0.0",
   "main": "dist/index.js",
+  "bin": {
+    "ai": "dist/index.js"
+  },
   "scripts": {
     "dev": "ts-node src/index.ts",
     "dev:api": "ts-node src/server.ts",
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "lint": "tsc --noEmit",
-    "test": "npm run build && node --test dist/test/**/*.test.js",
+    "test": "npm run build && node --test --test-concurrency=1 dist/test/**/*.test.js",
     "evals": "RUN_STORAGE_DIR=.eval-runs ts-node src/evals/runEvals.ts",
     "evals:report": "RUN_STORAGE_DIR=.eval-runs ts-node src/evals/runEvals.ts --output .eval-reports/latest.json",
     "evals:baseline": "ts-node src/evals/createEvalBaseline.ts --report .eval-reports/latest.json --output evals/baseline.json",

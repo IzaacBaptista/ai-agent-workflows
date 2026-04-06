@@ -1,6 +1,6 @@
 # AI Agent Workflows
 
-A local CLI application that runs AI-powered workflows for common engineering tasks: issue analysis, bug diagnosis, and pull request review.
+An autonomous engineering CLI that applies AI agents to investigate, document, and accelerate engineering workflows in any project connected to Jira and GitHub.
 
 ## Documentation map
 
@@ -9,15 +9,22 @@ A local CLI application that runs AI-powered workflows for common engineering ta
 
 ## What it does
 
-This project exposes three structured AI workflows:
+This project is an agentic engineering runtime with a CLI interface. It can read Jira issues, inspect local repositories, use controlled tools, generate documentation, create GitHub pull requests, and review its own reasoning.
+
+### Available commands
 
 | Command | Description |
 |---------|-------------|
-| `issue` | Analyses a product or engineering issue and produces a structured breakdown including a technical plan, acceptance criteria, test scenarios, risks, and assumptions. |
-| `bug`   | Diagnoses a bug report and returns possible causes, investigation steps, fix suggestions, and associated risks. |
-| `pr`    | Reviews a pull request description and returns a summary of impacts, risks, code suggestions, and test recommendations. |
+| `ai jira issue <KEY>` | Analyse a Jira issue and produce a structured breakdown with a technical plan, acceptance criteria, test scenarios, risks, and assumptions. |
+| `ai jira analyze <KEY>` | Deep technical analysis of a Jira issue: implementation plan, suggested branch name, PR title, acceptance criteria, and test scenarios. |
+| `ai github pr review <NUMBER>` | Review a GitHub pull request by number using live repository context. |
+| `ai github pr create <KEY>` | Draft a GitHub pull request from a Jira issue. If `GITHUB_TOKEN` and `GITHUB_REPO` are configured, the PR is opened automatically. |
+| `ai repo investigate "<query>"` | Investigate a free-text query against the local repository using code search, file reads, and git history. |
+| `ai issue "<text>"` | Analyse a product or engineering issue (flat alias). |
+| `ai bug "<text>"` | Diagnose a bug report (flat alias). |
+| `ai pr "<text>"` | Review a pull request description (flat alias). |
 
-Each workflow now runs as a multi-agent execution loop:
+Each workflow runs as a multi-agent execution loop:
 
 1. A planner proposes the next actions.
 2. A specialist, tool call, or delegated agent executes.
@@ -34,13 +41,35 @@ Responses are generated through the OpenAI Responses API and validated with [Zod
 
 ## Installation
 
+### Global install (recommended)
+
+```bash
+npm install -g ai-agent-workflows
+```
+
+Then use the `ai` command directly:
+
+```bash
+ai jira issue REL-123
+```
+
+### Local clone
+
 ```bash
 git clone https://github.com/IzaacBaptista/ai-agent-workflows.git
 cd ai-agent-workflows
 npm install
 ```
 
+When running from a local clone, use `npm run dev --` instead of `ai`:
+
+```bash
+npm run dev -- jira issue REL-123
+```
+
 ## Configuration
+
+### Environment variables
 
 Copy the example environment file and fill in your credentials:
 
@@ -59,7 +88,37 @@ RUN_STORAGE_DIR=.runs
 MAX_PERSISTED_RUNS=200
 EXTERNAL_API_BASE_URL=
 EXTERNAL_API_TIMEOUT_MS=5000
+
+# Jira integration
+JIRA_BASE_URL=https://your-org.atlassian.net
+JIRA_EMAIL=you@example.com
+JIRA_API_TOKEN=your_jira_api_token_here
+
+# GitHub integration
+GITHUB_TOKEN=ghp_your_token_here
+GITHUB_REPO=owner/repo
 ```
+
+### Per-project configuration (`ai-agent.config.json`)
+
+You can create an `ai-agent.config.json` file at the root of any project to configure the CLI without environment variables. The CLI scans the current directory and its parents to find this file.
+
+```json
+{
+  "jiraBaseUrl": "https://your-org.atlassian.net",
+  "jiraProjectKey": "REL",
+  "githubRepo": "owner/repo",
+  "allowedPaths": ["src", "lib"],
+  "model": "gpt-4o",
+  "runStorageDir": ".runs"
+}
+```
+
+See [`ai-agent.config.example.json`](./ai-agent.config.example.json) for a complete reference.
+
+**Merge order:** defaults → `.env` → `ai-agent.config.json` → CLI flags. The project config file overrides env vars for `model`, `runStorageDir`, `jiraBaseUrl`, and `githubRepo`. Credentials (`OPENAI_API_KEY`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `GITHUB_TOKEN`) are always read from environment variables only.
+
+> **Note:** Add `ai-agent.config.json` to `.gitignore` if it contains non-secret but project-specific settings you do not want to commit.
 
 ### Logging
 
@@ -103,49 +162,69 @@ EXTERNAL_API_TIMEOUT_MS=5000
 
 - `git_status` exposes the local working tree status as structured entries.
 - `git_diff` exposes the current local diff, including changed files and a truncated diff preview.
-- These tools are especially useful in `PRReviewWorkflow`, where the model may need real repository context beyond the user-provided PR summary.
+- `git_log` exposes recent commit history for a given path, including commit hash, subject, author, date, and changed files. Bounded to a maximum of 20 commits.
+- These tools are especially useful in `PRReviewWorkflow` and `RepoInvestigateWorkflow`, where the model may need real repository history beyond the user-provided input.
 
 ### File reading guardrails
 
-- `read_file` is limited to files inside `src/`.
+- `read_file` is limited to files inside the paths defined in `ai-agent.config.json` (`allowedPaths`).
+- If no project config is present, it defaults to `src/`.
 - Supported extensions are `.ts`, `.js`, `.json`, and `.md`.
 - This prevents the workflow runtime from reading arbitrary local files.
 
 ## Running workflows
 
+### Jira issue analysis
+
 ```bash
-npm run dev -- <command> "<input text>"
+ai jira issue REL-123
 ```
 
-You can also choose the final presentation layer:
+### Jira deep technical analysis
 
 ```bash
-npm run dev -- <command> "<input text>" --output raw
-npm run dev -- <command> "<input text>" --output summary
-npm run dev -- <command> "<input text>" --output timeline
+ai jira analyze REL-123
+```
+
+### GitHub PR review (by PR number, fetches from GitHub API)
+
+```bash
+ai github pr review 42
+```
+
+### GitHub PR creation from a Jira issue
+
+```bash
+ai github pr create REL-123
+```
+
+If `GITHUB_TOKEN` and `GITHUB_REPO` are set, this opens the PR automatically. Otherwise it prints the generated PR title and description.
+
+### Repository investigation
+
+```bash
+ai repo investigate "timeout not cleared in auth middleware"
+```
+
+### Legacy flat commands
+
+```bash
+npm run dev -- issue "User cannot login after password reset"
+npm run dev -- bug "500 error when creating order with coupon"
+npm run dev -- pr "Refactored auth middleware and updated token validation"
+```
+
+### Output modes
+
+```bash
+ai jira issue REL-123 --output raw
+ai jira issue REL-123 --output summary
+ai jira issue REL-123 --output timeline
 ```
 
 - `raw` preserves the current behavior: structured runtime logs plus the final JSON result.
 - `summary` keeps the raw logs and adds a short human-readable run summary before the final JSON result.
 - `timeline` keeps the raw logs and adds a grouped step-by-step timeline before the final JSON result.
-
-### Issue analysis
-
-```bash
-npm run dev -- issue "User cannot login after password reset"
-```
-
-### Bug diagnosis
-
-```bash
-npm run dev -- bug "500 error when creating order with coupon"
-```
-
-### PR review
-
-```bash
-npm run dev -- pr "Refactored auth middleware and updated token validation"
-```
 
 ## Example output
 
@@ -175,13 +254,20 @@ npm run dev -- pr "Refactored auth middleware and updated token validation"
     "assumptions": [
       "The issue is backend-related and not a client-side caching problem"
     ]
+  },
+  "meta": {
+    "runId": "IssueWorkflow:...",
+    "workflowName": "IssueWorkflow",
+    "status": "completed",
+    "stepCount": 8,
+    "jiraIssueKey": "REL-123"
   }
 }
 ```
 
 ## How a workflow runs
 
-All three workflows follow the same execution pattern:
+All workflows follow the same execution pattern:
 
 1. Planning
    creates an initial action queue such as `analyze -> tool_call(search_code) -> tool_call(read_file) -> finalize`.
@@ -202,13 +288,13 @@ All three workflows follow the same execution pattern:
 9. Command-aware decision making
    teaches planner, replanner, and critic to prefer `run_command` in bug and PR scenarios where executable build/test/lint evidence is more useful than additional code search or file reads.
 10. Command-memory feedback
-   carries prior command outcomes like `build_failed`, `build_passed`, and `test_timed_out` into relevant memory so repeated command loops are avoided when the state has not materially changed.
+    carries prior command outcomes like `build_failed`, `build_passed`, and `test_timed_out` into relevant memory so repeated command loops are avoided when the state has not materially changed.
 11. Git-aware PR context
-   allows the runtime to inspect `git_status` and `git_diff` so PR review can use the real local change set and modified hunks as evidence.
+    allows the runtime to inspect `git_status`, `git_diff`, and `git_log` so PR review and repo investigation can use the real local change set, modified hunks, and commit history as evidence.
 12. Controlled autonomous patching
-   allows the model to request `edit_patch`, apply a localized code change through `CoderAgent`, validate it automatically, and carry the resulting patch evidence forward into replanning and critique.
+    allows the model to request `edit_patch`, apply a localized code change through `CoderAgent`, validate it automatically, and carry the resulting patch evidence forward into replanning and critique.
 13. Isolated and reversible patch validation
-   evaluates `edit_patch` inside a temporary Git worktree, compares validation before/after, records the isolated diff, and gives the critic enough evidence to reject regressive or overly broad patches.
+    evaluates `edit_patch` inside a temporary Git worktree, compares validation before/after, records the isolated diff, and gives the critic enough evidence to reject regressive or overly broad patches.
 
 ## Runtime overview
 
@@ -221,23 +307,25 @@ The diagram below shows the current V1 shape of the product: a CLI and HTTP API 
 ```
 src/
 ├── cli/                  # CLI argument parsing and output-mode selection
-├── index.ts              # CLI entrypoint
+├── index.ts              # CLI entrypoint (also the global `ai` binary)
 ├── server.ts             # Express API entrypoint and run inspection endpoints
 ├── agents/               # Planner, replanner, critic, reviewer, coder, triage/final agents, and agent registry
 ├── core/                 # BaseAgent, action schemas, LLM client, workflow runtime, and shared types
-├── config/               # Environment variable loading
+├── config/               # Environment variable loading and per-project configuration
 ├── evals/                # Eval runner, baseline comparison helpers, and scenario definitions
 ├── helpers/              # Prompt loading, memory/planning context builders, workflow guidance, and GitHub helpers
 ├── integrations/
-│   └── github/           # postPRComment (GitHub REST API write operations)
+│   ├── github/           # postPRComment (write), createPR (create), fetchGitHubPR (read)
+│   └── jira/             # fetchJiraIssue (read), formatJiraIssue, jiraTypes
 ├── memory/               # Persisted run store, working memory snapshots, and relevant-memory retrieval
 ├── reporting/            # Human-readable execution summaries and timelines built from persisted run records
 ├── test/                 # Runtime, workflow, tool, parser, and HTTP-layer tests
-├── tools/                # Structured logging, repository tools, controlled patch application, allowlisted command execution, and tool registry/executor
-└── workflows/            # Runtime-driven workflow definitions for issue, bug, and PR review
+├── tools/                # Structured logging, repository tools, controlled patch application, allowlisted command execution, git tools (status, diff, log), and tool registry/executor
+└── workflows/            # Runtime-driven workflow definitions for issue, bug, PR review, Jira issue, Jira analyze, PR create, and repo investigate
 evals/                    # Committed eval baseline used by the regression gate
 scripts/                  # Local CI helpers such as the eval-aware gate script
-prompts/                  # Operational JSON-first prompts for planner, replanner, critic, reviewer, triage, and final analysis
+prompts/                  # Operational JSON-first prompts for all agents
+ai-agent.config.example.json  # Reference project-level configuration file
 ```
 
 ## HTTP API
@@ -272,52 +360,12 @@ curl -X POST http://localhost:3000/issue/analyze \
   -d '{"input":"User cannot login after password reset"}'
 ```
 
-```json
-{
-  "success": true,
-  "data": { "summary": "...", "technicalPlan": ["..."], ... },
-  "meta": {
-    "runId": "IssueWorkflow:...",
-    "workflowName": "IssueWorkflow",
-    "status": "completed",
-    "stepCount": 8,
-    "critiqueCount": 1,
-    "replanCount": 2,
-    "toolCallCount": 1,
-    "delegationCount": 0,
-    "maxDelegationDepthReached": 0,
-    "memoryHits": 3,
-    "criticRedirectCount": 0
-  }
-}
-```
-
 #### POST `/bug/analyze`
 
 ```bash
 curl -X POST http://localhost:3000/bug/analyze \
   -H "Content-Type: application/json" \
   -d '{"input":"500 error when creating order with coupon"}'
-```
-
-```json
-{
-  "success": true,
-  "data": { "summary": "...", "possibleCauses": ["..."], ... },
-  "meta": {
-    "runId": "BugWorkflow:...",
-    "workflowName": "BugWorkflow",
-    "status": "completed",
-    "stepCount": 9,
-    "critiqueCount": 1,
-    "replanCount": 2,
-    "toolCallCount": 1,
-    "delegationCount": 0,
-    "maxDelegationDepthReached": 0,
-    "memoryHits": 3,
-    "criticRedirectCount": 0
-  }
-}
 ```
 
 #### POST `/pr/review`
@@ -328,136 +376,19 @@ curl -X POST http://localhost:3000/pr/review \
   -d '{"input":"Refactored auth middleware and updated token validation"}'
 ```
 
-```json
-{
-  "success": true,
-  "data": { "summary": "...", "risks": ["..."], ... },
-  "meta": {
-    "runId": "PRReviewWorkflow:...",
-    "workflowName": "PRReviewWorkflow",
-    "status": "completed",
-    "stepCount": 9,
-    "critiqueCount": 1,
-    "replanCount": 2,
-    "toolCallCount": 1,
-    "delegationCount": 1,
-    "maxDelegationDepthReached": 1,
-    "memoryHits": 3,
-    "criticRedirectCount": 1
-  }
-}
-```
-
 #### POST `/github/pr-review`
 
 Accepts a structured GitHub PR payload and runs the same PR review workflow.
-
-```bash
-curl -X POST http://localhost:3000/github/pr-review \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repository":"IzaacBaptista/ai-agent-workflows",
-    "prNumber":4,
-    "title":"Refactor auth middleware",
-    "description":"Updated token validation and request guards",
-    "diff":"--- a/src/middleware/auth.ts\n+++ b/src/middleware/auth.ts\n@@ -12,7 +12,7 @@ export function authMiddleware(req, res, next) {\n-  if (!token) return res.status(401).send();\n+  if (!token) return res.status(401).json({ error: \"Unauthorized\" });\n   validateToken(token, next);\n }"
-  }'
-```
-
-```json
-{
-  "success": true,
-  "data": { "summary": "...", "risks": ["..."], ... },
-  "meta": {
-    "runId": "PRReviewWorkflow:...",
-    "workflowName": "PRReviewWorkflow",
-    "status": "completed",
-    "stepCount": 9,
-    "critiqueCount": 1,
-    "replanCount": 2
-  }
-}
-```
 
 #### POST `/github/pr-review/fetch`
 
 Fetches the PR data directly from the GitHub API and runs the review workflow. A `githubToken` is optional but recommended to avoid rate limiting.
 
-```bash
-curl -X POST http://localhost:3000/github/pr-review/fetch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repository": "IzaacBaptista/ai-agent-workflows",
-    "prNumber": 4,
-    "githubToken": "ghp_..."
-  }'
-```
-
-```json
-{
-  "success": true,
-  "data": { "summary": "...", "risks": ["..."], ... },
-  "meta": {
-    "runId": "PRReviewWorkflow:...",
-    "workflowName": "PRReviewWorkflow",
-    "status": "completed",
-    "stepCount": 9,
-    "critiqueCount": 1,
-    "replanCount": 2
-  }
-}
-```
-
 #### POST `/github/pr-review/comment`
 
 Fetches the PR from GitHub, runs the AI review, and posts the result as a comment directly on the pull request. A `githubToken` with write access is required.
 
-```bash
-curl -X POST http://localhost:3000/github/pr-review/comment \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repository": "IzaacBaptista/ai-agent-workflows",
-    "prNumber": 4,
-    "githubToken": "ghp_..."
-  }'
-```
-
-```json
-{
-  "success": true,
-  "data": { "summary": "...", "risks": ["..."], ... },
-  "meta": {
-    "runId": "PRReviewWorkflow:...",
-    "workflowName": "PRReviewWorkflow",
-    "status": "completed",
-    "stepCount": 9,
-    "critiqueCount": 1,
-    "replanCount": 2,
-    "githubComment": { "posted": true }
-  }
-}
-```
-
-If the review succeeds but posting the comment fails, the workflow metadata is still preserved and the GitHub posting result is attached under `meta.githubComment`:
-
-```json
-{
-  "success": true,
-  "data": { "summary": "...", "risks": ["..."], ... },
-  "meta": {
-    "runId": "PRReviewWorkflow:...",
-    "workflowName": "PRReviewWorkflow",
-    "status": "completed",
-    "stepCount": 9,
-    "critiqueCount": 1,
-    "replanCount": 2,
-    "githubComment": {
-      "posted": false,
-      "error": "Request failed with status code 403"
-    }
-  }
-}
-```
+If the review succeeds but posting the comment fails, the workflow metadata is still preserved and the GitHub posting result is attached under `meta.githubComment`.
 
 #### GET `/runs`
 
@@ -469,7 +400,23 @@ Returns the full persisted run record, including steps and status.
 
 #### GET `/runs/:runId/artifacts`
 
-Returns persisted artifacts such as plan, replans, critiques, context, tool calls, command results, git status/diff artifacts, and result.
+Returns persisted artifacts such as plan, replans, critiques, context, tool calls, command results, git status/diff/log artifacts, and result.
+
+### Error responses
+
+**400 – Invalid request body**
+
+```json
+{ "success": false, "error": "Invalid request body" }
+```
+
+**500 – Internal server error**
+
+```json
+{ "success": false, "error": "Internal server error" }
+```
+
+> **Note:** The CLI entrypoint (`npm run dev`) remains fully functional alongside the API.
 
 ## Testing
 
@@ -516,51 +463,6 @@ Run the full local CI gate, including lint, tests, eval report generation, and b
 ```bash
 npm run ci:local
 ```
-
-The eval gate works in two layers:
-
-- `npm run evals:report` already fails if any current scenario or check fails outright.
-- `npm run evals:compare` fails if a candidate report regresses any baseline scenario or required check, which makes branch-to-branch behavior regressions visible even when the overall suite still passes.
-
-`evals/baseline.json` should be committed. `.eval-reports/latest.json` remains ephemeral local/CI output.
-
-The eval harness uses isolated `.eval-runs` storage and checks scenario-level behavior such as:
-
-- preferring `run_command(test)` in bug investigation
-- applying a localized `edit_patch` and validating it automatically in a bug workflow
-- rejecting a regressive isolated patch based on before/after validation and unexpected diff spread
-- choosing between `lint`, `build`, and `test` based on workflow context
-- using `git_status` and `git_diff` in PR review
-- using staged Git diff context when that is the relevant review surface
-- suppressing repeated identical tool calls
-- forcing finalization on no-progress repository searches
-- critic-driven redirection to executable evidence
-- planner decisions influenced by relevant memory
-- safe failure when planner output violates the supported tool contract
-
-The current suite covers:
-
-- resilient parsing of OpenAI Responses output in `BaseAgent`
-- workflow runtime retries, timeouts, and execution metadata
-- tool and patch execution for `search_code`, `read_file`, `call_external_api`, `run_command`, `git_status`, `git_diff`, and controlled `edit_patch`
-- workflow orchestration, critique-driven revision, and failure paths
-- HTTP endpoints and response envelopes through `createApp()`
-
-### Error responses
-
-**400 – Invalid request body**
-
-```json
-{ "success": false, "error": "Invalid request body" }
-```
-
-**500 – Internal server error**
-
-```json
-{ "success": false, "error": "Internal server error" }
-```
-
-> **Note:** The CLI entrypoint (`npm run dev`) remains fully functional alongside the API.
 
 ## Building
 

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { extname, resolve } from "path";
+import { getProjectConfig } from "../config/projectConfig";
 
 export interface FileReadResult {
   file: string;
@@ -7,10 +8,22 @@ export interface FileReadResult {
 }
 
 const ALLOWED_EXTENSIONS = new Set([".ts", ".js", ".json", ".md"]);
-const ALLOWED_ROOT = resolve(process.cwd(), "src");
+
+function getAllowedRoots(): string[] {
+  const config = getProjectConfig();
+
+  if (config.allowedPaths && config.allowedPaths.length > 0) {
+    return config.allowedPaths.map((p) => resolve(process.cwd(), p));
+  }
+
+  return [resolve(process.cwd(), "src")];
+}
 
 function isAllowedPath(absolutePath: string): boolean {
-  return absolutePath === ALLOWED_ROOT || absolutePath.startsWith(`${ALLOWED_ROOT}/`);
+  const roots = getAllowedRoots();
+  return roots.some(
+    (root) => absolutePath === root || absolutePath.startsWith(`${root}/`),
+  );
 }
 
 function getReadPathValidationError(file: string): string | undefined {

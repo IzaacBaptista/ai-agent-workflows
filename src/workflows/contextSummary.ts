@@ -2,6 +2,7 @@ import {
   AppliedCodePatchResult,
   CommandExecutionResult,
   GitDiffResult,
+  GitLogResult,
   GitStatusResult,
   RuntimeAction,
   WorkflowExecutionMeta,
@@ -166,6 +167,29 @@ export function summarizeGitDiffResult(result: GitDiffResult | undefined): strin
     ...summarizeOverflow(result.changedFiles.length - 6, "changed files"),
     `- preview: ${truncateText(result.diff, 240) || "no diff output"}`,
   ];
+}
+
+export function summarizeGitLogResult(result: GitLogResult | undefined): string[] {
+  if (!result || result.commits.length === 0) {
+    return ["Git log:", "- No commits found"];
+  }
+
+  const commitWord = result.commits.length === 1 ? "commit" : "commits";
+  const pathSuffix = result.query ? ` for path: ${result.query}` : "";
+  const header = `Git log (${result.commits.length} ${commitWord}${pathSuffix}):`;
+
+  const lines = [header];
+
+  for (const commit of result.commits.slice(0, 5)) {
+    lines.push(`- ${commit.hash.slice(0, 8)} ${truncateText(commit.subject, 80)} (${commit.author}, ${commit.date})`);
+    for (const file of commit.files.slice(0, 3)) {
+      lines.push(`  - ${file}`);
+    }
+    lines.push(...summarizeOverflow(commit.files.length - 3, "files"));
+  }
+
+  lines.push(...summarizeOverflow(result.commits.length - 5, "commits"));
+  return lines;
 }
 
 export function summarizeUnknownValue(title: string, value: unknown, emptyLabel = "None"): string[] {

@@ -529,8 +529,9 @@ test("parseCliArgs reads output mode and falls back to raw when invalid", () => 
     "--output=invalid",
   ]);
 
-  assert.equal(summaryArgs.command, "bug");
+  assert.ok(summaryArgs.kind === "bug");
   assert.equal(summaryArgs.outputMode, "timeline");
   assert.equal(summaryArgs.input, "WorkflowRuntime timeouts are not cleared");
+  assert.ok(invalidArgs.kind === "issue");
   assert.equal(invalidArgs.outputMode, "raw");
 });

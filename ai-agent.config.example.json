@@ -1,0 +1,8 @@
+{
+  "jiraBaseUrl": "https://your-org.atlassian.net",
+  "jiraProjectKey": "REL",
+  "githubRepo": "owner/repo",
+  "allowedPaths": ["src"],
+  "model": "gpt-4o",
+  "runStorageDir": ".runs"
+}

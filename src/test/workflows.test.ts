@@ -22,6 +22,35 @@ function buildLlmResponse(payload: MockResponsePayload): { output_text: string }
   };
 }
 
+test("runPRReviewWorkflow fails fast when the LLM circuit is already open", async () => {
+  const circuitState = {
+    openUntil: Date.now() + 6_000,
+    reason: "provider_rate_limit",
+    updatedAt: new Date().toISOString(),
+  };
+
+  llmClient.setLlmCircuitStateStoreForTesting({
+    read: () => circuitState,
+    write: () => undefined,
+    clear: () => undefined,
+  });
+
+  try {
+    const result = await runPRReviewWorkflow("Refactored auth middleware");
+
+    assert.equal(result.success, false);
+    if (result.success) {
+      return;
+    }
+
+    assert.match(result.error, /rate limit reached/i);
+    assert.equal(result.meta.workflowName, "PRReviewWorkflow");
+    assert.equal(result.meta.stepCount, 0);
+  } finally {
+    llmClient.setLlmCircuitStateStoreForTesting();
+  }
+});
+
 test("runIssueWorkflow executes model-driven tool call and finalize", async () => {
   const originalCallLlm = llmClient.callLLM;
   const responses = [

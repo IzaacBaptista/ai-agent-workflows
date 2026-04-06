@@ -588,3 +588,41 @@ test("GET /runs exposes persisted run summaries", async () => {
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
   }
 });
+
+test("POST /github/pr-review/fetch fails fast when the LLM circuit is open", async () => {
+  const circuitState = {
+    openUntil: Date.now() + 5_000,
+    reason: "provider_rate_limit",
+    updatedAt: new Date().toISOString(),
+  };
+
+  llmClient.setLlmCircuitStateStoreForTesting({
+    read: () => circuitState,
+    write: () => undefined,
+    clear: () => undefined,
+  });
+
+  try {
+    const app = createApp();
+    const response = await invokeRoute(app, "post", "/github/pr-review/fetch", {
+      body: {
+        repository: "owner/repo",
+        prNumber: 10,
+      },
+    });
+
+    const body = response.body as {
+      success: boolean;
+      error: string;
+      meta: { workflowName: string; stepCount: number };
+    };
+
+    assert.equal(response.statusCode, 429);
+    assert.equal(body.success, false);
+    assert.match(body.error, /rate limit reached/i);
+    assert.equal(body.meta.workflowName, "PRReviewWorkflow");
+    assert.equal(body.meta.stepCount, 0);
+  } finally {
+    llmClient.setLlmCircuitStateStoreForTesting();
+  }
+});
