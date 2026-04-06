@@ -12,6 +12,7 @@ import {
   WorkflowDefinition,
   WorkflowExecutionState,
   WorkflowRuntime,
+  setRuntimeSleepForTesting,
 } from "../core/workflowRuntime";
 import {
   setCodePatchApplierForTesting,
@@ -222,7 +223,12 @@ test("WorkflowRuntime retries failed step once when configured", async () => {
   assert.equal(runtime.getRunRecord().steps.length, 2);
 });
 
-test("WorkflowRuntime does not retry a step after callLLM exhausts provider retries", async () => {
+test("WorkflowRuntime retries a step on rate-limit error and sleeps for retryAfterMs", async () => {
+  const sleepCalls: number[] = [];
+  setRuntimeSleepForTesting(async (ms) => {
+    sleepCalls.push(ms);
+  });
+
   const runtime = new WorkflowRuntime({
     workflowName: "ProviderFailureWorkflow",
     input: "provider failure input",
@@ -255,9 +261,14 @@ test("WorkflowRuntime does not retry a step after callLLM exhausts provider retr
     /rate limit reached/i,
   );
 
-  assert.equal(attemptCount, 1);
-  assert.equal(runtime.getRunRecord().steps.length, 1);
+  assert.equal(attemptCount, 2);
+  assert.equal(sleepCalls.length, 1);
+  assert.equal(sleepCalls[0], 3000);
+  assert.equal(runtime.getRunRecord().steps.length, 2);
   assert.equal(runtime.getRunRecord().steps[0]?.attempt, 1);
+  assert.equal(runtime.getRunRecord().steps[1]?.attempt, 2);
+
+  setRuntimeSleepForTesting();
 });
 
 test("WorkflowRuntime fails timed out step and records failure", async () => {

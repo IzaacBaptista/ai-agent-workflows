@@ -60,6 +60,15 @@ import {
 } from "./types";
 import { isLlmProviderError } from "./llmClient";
 
+let runtimeSleepFn: (ms: number) => Promise<void> = (ms) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+export function setRuntimeSleepForTesting(fn?: (ms: number) => Promise<void>): void {
+  runtimeSleepFn = fn ?? ((ms) => new Promise((resolve) => { setTimeout(resolve, ms); }));
+}
+
 interface WorkflowRuntimeOptions {
   workflowName: string;
   input: string;
@@ -283,7 +292,17 @@ class WorkflowStepTimeoutError extends Error {
 }
 
 function shouldRetryStepError(error: unknown): boolean {
+  if (isLlmProviderError(error) && error.kind === "rate_limit") {
+    return true;
+  }
   return !isLlmProviderError(error) && !(error instanceof WorkflowStepTimeoutError);
+}
+
+function getStepRetryDelayMs(error: unknown): number {
+  if (isLlmProviderError(error) && error.kind === "rate_limit" && error.retryAfterMs) {
+    return error.retryAfterMs;
+  }
+  return 0;
 }
 
 export class WorkflowRuntime {
@@ -595,6 +614,11 @@ export class WorkflowRuntime {
 
         if (attempt > this.policy.maxRetriesPerStep || !shouldRetryStepError(error)) {
           throw error;
+        }
+
+        const retryDelayMs = getStepRetryDelayMs(error);
+        if (retryDelayMs > 0) {
+          await runtimeSleepFn(retryDelayMs);
         }
       } finally {
         if (timeoutHandle) {
