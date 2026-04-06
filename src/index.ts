@@ -57,6 +57,8 @@ Examples:
 `);
 }
 
+const MAX_STDERR_DISPLAY_CHARS = 1000;
+
 async function askYesNo(question: string): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolveAnswer) => {
@@ -184,7 +186,8 @@ async function main(): Promise<void> {
           result = analyzeResult;
         } else {
           console.log("\nApplying changes...");
-          let applyResult = await runApplyPlanWorkflow(command.issueKey, analysis);
+          const firstApply = await runApplyPlanWorkflow(command.issueKey, analysis);
+          let applyResult = firstApply;
 
           if (!applyResult.success) {
             console.error(`Apply failed: ${applyResult.error}`);
@@ -192,7 +195,8 @@ async function main(): Promise<void> {
               !command.yes && (await askYesNo("Retry apply? [y/N] "));
             if (shouldRetry) {
               console.log("Retrying...");
-              applyResult = await runApplyPlanWorkflow(command.issueKey, analysis);
+              const retryApply = await runApplyPlanWorkflow(command.issueKey, analysis);
+              applyResult = retryApply;
             }
           }
 
@@ -212,7 +216,7 @@ async function main(): Promise<void> {
                 `\nValidation (${validationResult.command}): ${passed ? "PASSED" : "FAILED"} (exit ${validationResult.exitCode ?? "null"})`,
               );
               if (!passed && validationResult.stderr) {
-                console.log(validationResult.stderr.slice(0, 1000));
+                console.log(validationResult.stderr.slice(0, MAX_STDERR_DISPLAY_CHARS));
               }
             }
 
