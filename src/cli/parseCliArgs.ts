@@ -2,7 +2,15 @@ import { normalizeOutputMode, OutputMode } from "../reporting/reportingTypes";
 
 export type ParsedCliCommand =
   | { kind: "jira-issue"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
-  | { kind: "jira-analyze"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
+  | {
+      kind: "jira-analyze";
+      issueKey: string;
+      outputMode: OutputMode;
+      repoRoot?: string;
+      planOnly?: boolean;
+      yes?: boolean;
+      agentic?: boolean;
+    }
   | { kind: "github-pr-review"; input: string; outputMode: OutputMode; repoRoot?: string }
   | { kind: "github-pr-create"; issueKey: string; outputMode: OutputMode; repoRoot?: string }
   | { kind: "repo-investigate"; query: string; outputMode: OutputMode; repoRoot?: string }
@@ -14,11 +22,17 @@ export type ParsedCliCommand =
 function extractCliOptions(tokens: string[]): {
   outputMode: OutputMode;
   repoRoot?: string;
+  planOnly?: boolean;
+  yes?: boolean;
+  agentic?: boolean;
   remaining: string[];
 } {
   const remaining: string[] = [];
   let requestedOutputMode: string | undefined;
   let repoRoot: string | undefined;
+  let planOnly: boolean | undefined;
+  let yes: boolean | undefined;
+  let agentic: boolean | undefined;
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -50,10 +64,25 @@ function extractCliOptions(tokens: string[]): {
       continue;
     }
 
+    if (token === "--plan-only") {
+      planOnly = true;
+      continue;
+    }
+
+    if (token === "--yes" || token === "-y") {
+      yes = true;
+      continue;
+    }
+
+    if (token === "--agentic") {
+      agentic = true;
+      continue;
+    }
+
     remaining.push(token);
   }
 
-  return { outputMode: normalizeOutputMode(requestedOutputMode), repoRoot, remaining };
+  return { outputMode: normalizeOutputMode(requestedOutputMode), repoRoot, planOnly, yes, agentic, remaining };
 }
 
 export function parseCliArgs(argv: string[]): ParsedCliCommand {
@@ -63,7 +92,7 @@ export function parseCliArgs(argv: string[]): ParsedCliCommand {
     return { kind: "unknown", raw: [] };
   }
 
-  const { outputMode, repoRoot, remaining } = extractCliOptions(afterNamespace);
+  const { outputMode, repoRoot, planOnly, yes, agentic, remaining } = extractCliOptions(afterNamespace);
 
   // Namespaced commands: ai jira <subcommand> <arg>
   if (namespace === "jira") {
@@ -75,7 +104,7 @@ export function parseCliArgs(argv: string[]): ParsedCliCommand {
     }
 
     if (subcommand === "analyze" && arg) {
-      return { kind: "jira-analyze", issueKey: arg, outputMode, repoRoot };
+      return { kind: "jira-analyze", issueKey: arg, outputMode, repoRoot, planOnly, yes, agentic };
     }
 
     return { kind: "unknown", raw: [namespace, subcommand ?? "", ...rest] };
