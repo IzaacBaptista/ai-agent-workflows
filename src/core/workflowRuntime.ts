@@ -274,8 +274,15 @@ function getUnexpectedChangedFiles(changedFiles: string[], requestedFiles: strin
   return changedFiles.filter((file) => !requested.has(file.trim()));
 }
 
+class WorkflowStepTimeoutError extends Error {
+  constructor(stepName: string) {
+    super(`Step "${stepName}" timed out`);
+    this.name = "WorkflowStepTimeoutError";
+  }
+}
+
 function shouldRetryStepError(error: unknown): boolean {
-  return !isLlmProviderError(error);
+  return !isLlmProviderError(error) && !(error instanceof WorkflowStepTimeoutError);
 }
 
 export class WorkflowRuntime {
@@ -542,7 +549,7 @@ export class WorkflowRuntime {
       try {
         const timeoutPromise = new Promise<T>((_, reject) => {
           timeoutHandle = setTimeout(
-            () => reject(new Error(`Step "${name}" timed out`)),
+            () => reject(new WorkflowStepTimeoutError(name)),
             this.policy.timeoutMs,
           );
         });

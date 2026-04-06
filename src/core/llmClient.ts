@@ -14,6 +14,7 @@ type LlmTransport = (
   body: unknown,
   config: {
     headers: Record<string, string>;
+    timeout: number;
   },
 ) => Promise<{ data: unknown }>;
 
@@ -112,6 +113,19 @@ function getRetryAfterHeader(error: unknown): string | undefined {
   }
 
   return undefined;
+}
+
+function isRequestTimeoutError(error: unknown): boolean {
+  const code = getErrorCode(error);
+  if (code === "ECONNABORTED") {
+    return true;
+  }
+
+  if (!isRecord(error) || typeof error.message !== "string") {
+    return false;
+  }
+
+  return /timeout/i.test(error.message);
 }
 
 function parseRetryAfterMs(header: string | undefined): number | undefined {
@@ -345,7 +359,17 @@ function wrapFinalLlmError(error: unknown, retryAfterMs?: number): Error {
     );
   }
 
-  if (code === "ECONNABORTED" || code === "ECONNRESET" || code === "ETIMEDOUT") {
+  if (isRequestTimeoutError(error)) {
+    return new LlmProviderError(
+      "network",
+      `LLM request timed out after approximately ${Math.ceil(env.LLM_REQUEST_TIMEOUT_MS / 1000)}s.`,
+      {
+        cause: error,
+      },
+    );
+  }
+
+  if (code === "ECONNRESET" || code === "ETIMEDOUT") {
     return new LlmProviderError(
       "network",
       "LLM request failed due to a transient provider/network timeout after retries.",
@@ -416,6 +440,7 @@ export async function callLLM(input: string) {
               Authorization: `Bearer ${env.OPENAI_API_KEY}`,
               "Content-Type": "application/json",
             },
+            timeout: env.LLM_REQUEST_TIMEOUT_MS,
           },
         );
 

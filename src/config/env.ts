@@ -9,6 +9,7 @@ export const env = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   MODEL: projectConfig.model || process.env.MODEL || "gpt-5",
   LLM_MAX_RETRIES: Number(process.env.LLM_MAX_RETRIES || "2"),
+  LLM_REQUEST_TIMEOUT_MS: Number(process.env.LLM_REQUEST_TIMEOUT_MS || "15000"),
   LLM_RETRY_BASE_DELAY_MS: Number(process.env.LLM_RETRY_BASE_DELAY_MS || "1000"),
   LLM_RETRY_MAX_DELAY_MS: Number(process.env.LLM_RETRY_MAX_DELAY_MS || "8000"),
   LLM_REQUEST_GATE_POLL_MS: Number(process.env.LLM_REQUEST_GATE_POLL_MS || "250"),
