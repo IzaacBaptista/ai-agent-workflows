@@ -36,6 +36,7 @@ import {
   logAgentExecutionSuccess,
   startAgentExecution,
 } from "../tools/loggingTool";
+import { buildLlmPreflightFailure } from "./workflowPreflight";
 
 function buildJiraAnalyzeWorkflowContext(
   input: string,
@@ -184,6 +185,15 @@ const jiraAnalyzeWorkflowDefinition: WorkflowDefinition<IssueTriage, JiraAnalysi
 export async function runJiraAnalyzeWorkflow(
   issueKey: string,
 ): Promise<WorkflowResult<JiraAnalysis>> {
+  const preflightFailure = buildLlmPreflightFailure<JiraAnalysis>(
+    "JiraAnalyzeWorkflow",
+    `Jira issue key: ${issueKey}`,
+    { jiraIssueKey: issueKey },
+  );
+  if (preflightFailure) {
+    return preflightFailure;
+  }
+
   const issue = await fetchJiraIssue(issueKey, {
     baseUrl: env.JIRA_BASE_URL,
     email: env.JIRA_EMAIL,

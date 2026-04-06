@@ -295,12 +295,27 @@ function getActiveCircuitDelayMs(now = Date.now()): number {
   return remainingMs;
 }
 
+export function getLlmPreflightDelayMs(now = Date.now()): number {
+  return getActiveCircuitDelayMs(now);
+}
+
 function buildRateLimitErrorMessage(retryAfterMs?: number): string {
   if (retryAfterMs == null || retryAfterMs <= 0) {
     return "LLM provider rate limit reached before the workflow could continue.";
   }
 
   return `LLM provider rate limit reached. Retry after approximately ${Math.ceil(retryAfterMs / 1000)}s.`;
+}
+
+export function getLlmPreflightError(now = Date.now()): LlmProviderError | null {
+  const retryAfterMs = getActiveCircuitDelayMs(now);
+  if (retryAfterMs <= 0) {
+    return null;
+  }
+
+  return new LlmProviderError("rate_limit", buildRateLimitErrorMessage(retryAfterMs), {
+    retryAfterMs,
+  });
 }
 
 function wrapFinalLlmError(error: unknown, retryAfterMs?: number): Error {

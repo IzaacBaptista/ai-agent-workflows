@@ -41,6 +41,7 @@ import {
   startAgentExecution,
 } from "../tools/loggingTool";
 import { runJiraAnalyzeWorkflow } from "./jiraAnalyzeWorkflow";
+import { buildLlmPreflightFailure } from "./workflowPreflight";
 
 function buildPRCreateWorkflowContext(
   input: string,
@@ -226,6 +227,15 @@ async function runPRCreateAgenticLoop(
 export async function runPRCreateWorkflow(
   issueKey: string,
 ): Promise<WorkflowResult<PRCreateResult>> {
+  const preflightFailure = buildLlmPreflightFailure<PRCreateResult>(
+    "PRCreateWorkflow",
+    `Create GitHub PR from Jira issue: ${issueKey}`,
+    { jiraIssueKey: issueKey },
+  );
+  if (preflightFailure) {
+    return preflightFailure;
+  }
+
   const analyzeResult = await runJiraAnalyzeWorkflow(issueKey);
 
   if (!analyzeResult.success) {

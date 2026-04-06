@@ -37,6 +37,7 @@ import {
   logAgentExecutionSuccess,
   startAgentExecution,
 } from "../tools/loggingTool";
+import { buildLlmPreflightFailure } from "./workflowPreflight";
 
 function buildPRWorkflowContext(
   diff: string,
@@ -179,6 +180,11 @@ const prWorkflowDefinition: WorkflowDefinition<PRTriage, PRReview> = {
 };
 
 export async function runPRReviewWorkflow(diff: string): Promise<WorkflowResult<PRReview>> {
+  const preflightFailure = buildLlmPreflightFailure<PRReview>("PRReviewWorkflow", diff);
+  if (preflightFailure) {
+    return preflightFailure;
+  }
+
   const execution = startAgentExecution("PRReviewWorkflow", diff);
   const runtime = new WorkflowRuntime({
     workflowName: "PRReviewWorkflow",

@@ -33,6 +33,7 @@ import {
   logAgentExecutionSuccess,
   startAgentExecution,
 } from "../tools/loggingTool";
+import { buildLlmPreflightFailure } from "./workflowPreflight";
 
 function buildIssueWorkflowContext(
   issue: string,
@@ -257,6 +258,11 @@ const issueWorkflowDefinition: WorkflowDefinition<IssueTriage, IssueAnalysis> = 
 };
 
 export async function runIssueWorkflow(issue: string): Promise<WorkflowResult<IssueAnalysis>> {
+  const preflightFailure = buildLlmPreflightFailure<IssueAnalysis>("IssueWorkflow", issue);
+  if (preflightFailure) {
+    return preflightFailure;
+  }
+
   const execution = startAgentExecution("IssueWorkflow", issue);
   const runtime = new WorkflowRuntime({
     workflowName: "IssueWorkflow",

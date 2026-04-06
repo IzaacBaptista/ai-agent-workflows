@@ -35,6 +35,7 @@ import {
   logAgentExecutionSuccess,
   startAgentExecution,
 } from "../tools/loggingTool";
+import { buildLlmPreflightFailure } from "./workflowPreflight";
 
 function buildRepoInvestigateWorkflowContext(
   query: string,
@@ -188,6 +189,14 @@ const repoInvestigateWorkflowDefinition: WorkflowDefinition<BugTriage, RepoInves
 export async function runRepoInvestigateWorkflow(
   query: string,
 ): Promise<WorkflowResult<RepoInvestigationResult>> {
+  const preflightFailure = buildLlmPreflightFailure<RepoInvestigationResult>(
+    "RepoInvestigateWorkflow",
+    query,
+  );
+  if (preflightFailure) {
+    return preflightFailure;
+  }
+
   const execution = startAgentExecution("RepoInvestigateWorkflow", query);
   const runtime = new WorkflowRuntime({
     workflowName: "RepoInvestigateWorkflow",

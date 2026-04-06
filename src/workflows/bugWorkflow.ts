@@ -34,6 +34,7 @@ import {
   logAgentExecutionSuccess,
   startAgentExecution,
 } from "../tools/loggingTool";
+import { buildLlmPreflightFailure } from "./workflowPreflight";
 
 function buildBugWorkflowContext(
   bugDescription: string,
@@ -166,6 +167,14 @@ const bugWorkflowDefinition: WorkflowDefinition<BugTriage, BugAnalysis> = {
 };
 
 export async function runBugWorkflow(bugDescription: string): Promise<WorkflowResult<BugAnalysis>> {
+  const preflightFailure = buildLlmPreflightFailure<BugAnalysis>(
+    "BugWorkflow",
+    bugDescription,
+  );
+  if (preflightFailure) {
+    return preflightFailure;
+  }
+
   const execution = startAgentExecution("BugWorkflow", bugDescription);
   const runtime = new WorkflowRuntime({
     workflowName: "BugWorkflow",
