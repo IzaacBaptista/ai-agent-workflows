@@ -1325,3 +1325,189 @@ test("WorkflowRuntime stops new delegations when the delegation budget is exhaus
   );
   assert.equal(state.actionQueue[0].type, "finalize");
 });
+
+// ─── runSimple tests ───────────────────────────────────────────────────────────
+
+test("WorkflowRuntime.runSimple runs triage then finalize without planner", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "SimpleTestWorkflow",
+    input: "simple input",
+    policy: { maxSteps: 5, maxRetriesPerStep: 0, timeoutMs: 1000 },
+  });
+
+  let triageCalled = false;
+  let finalizeCalled = false;
+
+  const definition = createDefinition({
+    workflowName: "SimpleTestWorkflow",
+    runTriage: async (task) => {
+      triageCalled = true;
+      return { summary: `triage:${task}` };
+    },
+    runFinal: async (task) => {
+      finalizeCalled = true;
+      return { done: true, note: `final:${task}` };
+    },
+  });
+
+  const result = await runtime.runSimple(definition, "simple input", "do the work");
+
+  assert.equal(triageCalled, true);
+  assert.equal(finalizeCalled, true);
+  assert.equal(result.note, "final:do the work");
+
+  // Should have exactly 2 steps: triage (analyze) + finalize — no plan/critique/replan steps
+  const steps = runtime.getRunRecord().steps;
+  assert.equal(steps.length, 2);
+  assert.equal(steps[0]?.actionType, "analyze");
+  assert.equal(steps[1]?.actionType, "finalize");
+});
+
+test("WorkflowRuntime.runSimple calls collectContext callback and saves artifacts", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "SimpleContextWorkflow",
+    input: "context input",
+    policy: { maxSteps: 5, maxRetriesPerStep: 0, timeoutMs: 1000 },
+  });
+
+  let collectedTriage: TestTriage | undefined;
+  let runtimeRef: WorkflowRuntime | undefined;
+
+  const definition = createDefinition({
+    workflowName: "SimpleContextWorkflow",
+    runTriage: async () => ({ summary: "triage summary" }),
+    runFinal: async () => ({ done: true, note: "result" }),
+  });
+
+  await runtime.runSimple(
+    definition,
+    "context input",
+    "collect context task",
+    async (triage, rt) => {
+      collectedTriage = triage;
+      runtimeRef = rt;
+      rt.saveArtifact("testContext", { collected: true });
+    },
+  );
+
+  assert.deepEqual(collectedTriage, { summary: "triage summary" });
+  assert.equal(runtimeRef === runtime, true);
+  assert.deepEqual(runtime.getRunRecord().artifacts.testContext, { collected: true });
+  assert.deepEqual(runtime.getRunRecord().artifacts.triage, { summary: "triage summary" });
+});
+
+test("WorkflowRuntime.runSimple triage result is passed to buildFinalContext", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "SimpleContextPassWorkflow",
+    input: "original input",
+    policy: { maxSteps: 5, maxRetriesPerStep: 0, timeoutMs: 1000 },
+  });
+
+  let finalContextSeen: string | undefined;
+
+  const definition = createDefinition({
+    workflowName: "SimpleContextPassWorkflow",
+    runTriage: async () => ({ summary: "triage-output" }),
+    buildFinalContext: (input, _rt, triage) => {
+      return `ctx:${input}:${(triage as TestTriage).summary}`;
+    },
+    runFinal: async (_task, context) => {
+      finalContextSeen = context;
+      return { done: true, note: "done" };
+    },
+  });
+
+  await runtime.runSimple(definition, "original input", "final task");
+
+  assert.ok(finalContextSeen?.includes("ctx:original input:triage-output"));
+  assert.ok(finalContextSeen?.includes("Final task:"));
+  assert.ok(finalContextSeen?.includes("final task"));
+});
+
+test("WorkflowRuntime.runSimple propagates triage failure", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "SimpleTriageFailWorkflow",
+    input: "fail input",
+    policy: { maxSteps: 5, maxRetriesPerStep: 0, timeoutMs: 1000 },
+  });
+
+  const definition = createDefinition({
+    workflowName: "SimpleTriageFailWorkflow",
+    runTriage: async () => {
+      throw new Error("triage exploded");
+    },
+  });
+
+  await assert.rejects(
+    () => runtime.runSimple(definition, "fail input", "task"),
+    /triage exploded/,
+  );
+
+  const steps = runtime.getRunRecord().steps;
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0]?.status, "failed");
+  assert.match(steps[0]?.error ?? "", /triage exploded/);
+});
+
+test("WorkflowRuntime.runSimple propagates finalize failure", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "SimpleFinalFailWorkflow",
+    input: "fail input",
+    policy: { maxSteps: 5, maxRetriesPerStep: 0, timeoutMs: 1000 },
+  });
+
+  const definition = createDefinition({
+    workflowName: "SimpleFinalFailWorkflow",
+    runTriage: async () => ({ summary: "ok" }),
+    runFinal: async () => {
+      throw new Error("finalize exploded");
+    },
+  });
+
+  await assert.rejects(
+    () => runtime.runSimple(definition, "fail input", "task"),
+    /finalize exploded/,
+  );
+
+  const steps = runtime.getRunRecord().steps;
+  assert.equal(steps.length, 2);
+  assert.equal(steps[0]?.status, "completed");
+  assert.equal(steps[1]?.status, "failed");
+  assert.match(steps[1]?.error ?? "", /finalize exploded/);
+});
+
+test("WorkflowRuntime.runSimple does not invoke planner, replanner, or critic", async () => {
+  const runtime = new WorkflowRuntime({
+    workflowName: "SimpleNoCriticWorkflow",
+    input: "no critic input",
+    policy: { maxSteps: 5, maxRetriesPerStep: 0, timeoutMs: 1000 },
+  });
+
+  let plannerCalled = false;
+  let replannerCalled = false;
+  let criticCalled = false;
+
+  const definition = createDefinition({
+    workflowName: "SimpleNoCriticWorkflow",
+    runPlanner: async () => {
+      plannerCalled = true;
+      return { summary: "plan", actions: [] };
+    },
+    runReplanner: async () => {
+      replannerCalled = true;
+      return { summary: "replan", actions: [] };
+    },
+    runCritic: async () => {
+      criticCalled = true;
+      return { approved: true, summary: "ok", missingEvidence: [], confidence: "high" } satisfies WorkflowCritique;
+    },
+    runTriage: async () => ({ summary: "triage" }),
+    runFinal: async () => ({ done: true, note: "done" }),
+  });
+
+  await runtime.runSimple(definition, "no critic input", "task");
+
+  assert.equal(plannerCalled, false, "planner must not be called in simple mode");
+  assert.equal(replannerCalled, false, "replanner must not be called in simple mode");
+  assert.equal(criticCalled, false, "critic must not be called in simple mode");
+});

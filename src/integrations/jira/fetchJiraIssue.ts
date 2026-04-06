@@ -85,7 +85,15 @@ function extractStringArray(value: unknown): string[] {
     .filter((item): item is string => item !== null);
 }
 
-export async function fetchJiraIssue(
+type JiraIssueFetcher = (issueKey: string, options: JiraFetchOptions) => Promise<JiraIssue>;
+
+let jiraIssueFetcher: JiraIssueFetcher = defaultFetchJiraIssue;
+
+export function setJiraIssueFetcherForTesting(fetcher?: JiraIssueFetcher): void {
+  jiraIssueFetcher = fetcher ?? defaultFetchJiraIssue;
+}
+
+async function defaultFetchJiraIssue(
   issueKey: string,
   options: JiraFetchOptions,
 ): Promise<JiraIssue> {
@@ -138,4 +146,11 @@ export async function fetchJiraIssue(
     components: extractStringArray(fields.components),
     url: `${normalizedBaseUrl}/browse/${issueKey}`,
   };
+}
+
+export async function fetchJiraIssue(
+  issueKey: string,
+  options: JiraFetchOptions,
+): Promise<JiraIssue> {
+  return jiraIssueFetcher(issueKey, options);
 }

@@ -203,11 +203,36 @@ export async function runJiraAnalyzeWorkflow(
     return preflightFailure;
   }
 
-  const issue = await fetchJiraIssue(issueKey, {
-    baseUrl: env.JIRA_BASE_URL,
-    email: env.JIRA_EMAIL,
-    apiToken: env.JIRA_API_TOKEN,
-  });
+  let issue;
+  try {
+    issue = await fetchJiraIssue(issueKey, {
+      baseUrl: env.JIRA_BASE_URL,
+      email: env.JIRA_EMAIL,
+      apiToken: env.JIRA_API_TOKEN,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[JiraAnalyzeWorkflow] Failed to fetch Jira issue:", message);
+    return {
+      success: false,
+      error: message,
+      meta: {
+        runId: "",
+        workflowName: "JiraAnalyzeWorkflow",
+        status: "failed",
+        stepCount: 0,
+        critiqueCount: 0,
+        replanCount: 0,
+        toolCallCount: 0,
+        editActionCount: 0,
+        delegationCount: 0,
+        maxDelegationDepthReached: 0,
+        memoryHits: 0,
+        criticRedirectCount: 0,
+        jiraIssueKey: issueKey,
+      },
+    };
+  }
 
   const input = formatJiraIssue(issue);
 
