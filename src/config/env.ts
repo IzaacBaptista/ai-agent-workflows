@@ -13,6 +13,7 @@ export const env = {
   LLM_RETRY_MAX_DELAY_MS: Number(process.env.LLM_RETRY_MAX_DELAY_MS || "8000"),
   LLM_REQUEST_GATE_POLL_MS: Number(process.env.LLM_REQUEST_GATE_POLL_MS || "250"),
   LLM_REQUEST_GATE_STALE_MS: Number(process.env.LLM_REQUEST_GATE_STALE_MS || "120000"),
+  STEP_TIMEOUT_MS: Number(process.env.STEP_TIMEOUT_MS || "120000"),
   LOG_LEVEL: process.env.LOG_LEVEL || "info",
   LOG_FULL_PAYLOADS: process.env.LOG_FULL_PAYLOADS === "true",
   RUN_STORAGE_DIR: projectConfig.runStorageDir || process.env.RUN_STORAGE_DIR || ".runs",

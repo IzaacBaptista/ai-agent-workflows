@@ -1,3 +1,4 @@
+import { env } from "../config/env";
 import { getDelegatableAgentNames, isRegisteredAgentName, runDelegatedAgent } from "../agents/agentRegistry";
 import { CoderAgent } from "../agents/coderAgent";
 import { buildRelevantMemoryContext } from "../memory/runMemoryStore";
@@ -152,7 +153,7 @@ export interface WorkflowDefinition<TTriage, TResult> {
 const DEFAULT_POLICY: WorkflowExecutionPolicy = {
   maxSteps: 10,
   maxRetriesPerStep: 1,
-  timeoutMs: 60_000,
+  timeoutMs: env.STEP_TIMEOUT_MS,
   maxConsecutiveNoProgress: 1,
   maxToolCalls: 4,
   maxRepeatedIdenticalToolCalls: 1,
