@@ -63,7 +63,7 @@ echo "[TDD] Expected result: at least one test FAILS before implementation" >&2
 if [ "$RUN_FLAG" = "--run" ]; then
   echo "Running test suite..." >&2
   cd "$PROJECT_ROOT"
-  $TEST_CMD 2>&1 || true
+  $TEST_CMD >&2 2>&1 || true
 fi
 
 python3 -c "
