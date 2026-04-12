@@ -1,0 +1,10 @@
+{
+  "name": "shipping-and-launch",
+  "category": "core",
+  "description": "Runs a pre-flight checklist and produces a release summary before any deployment.",
+  "triggers": ["ship this", "release", "deploy", "publish", "launch", "cut a release", "ready to ship", "prepare release"],
+  "required_tools": ["bash", "git", "node"],
+  "required_commands": [],
+  "supports_fix": false,
+  "timeout_seconds": 180
+}

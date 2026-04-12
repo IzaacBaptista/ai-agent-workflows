@@ -1,0 +1,10 @@
+{
+  "name": "test-driven-development",
+  "category": "core",
+  "description": "Guides a strict red → green → refactor TDD cycle.",
+  "triggers": ["write tests", "add test coverage", "test first", "red-green-refactor", "unit test", "integration test"],
+  "required_tools": ["bash"],
+  "required_commands": ["npm run test"],
+  "supports_fix": false,
+  "timeout_seconds": 120
+}

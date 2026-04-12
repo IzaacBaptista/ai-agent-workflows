@@ -1,0 +1,10 @@
+{
+  "name": "incremental-implementation",
+  "category": "workflow-specific",
+  "description": "Breaks a spec into small, independently verifiable implementation steps and executes them one at a time.",
+  "triggers": ["implement the spec", "build this", "write the code", "code it up", "start implementing"],
+  "required_tools": ["bash"],
+  "required_commands": [],
+  "supports_fix": false,
+  "timeout_seconds": 30
+}

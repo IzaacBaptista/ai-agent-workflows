@@ -1,0 +1,10 @@
+{
+  "name": "code-simplification",
+  "category": "core",
+  "description": "Analyses code for unnecessary complexity and produces a refactoring plan.",
+  "triggers": ["simplify this", "refactor", "reduce complexity", "clean up", "too complex", "hard to read", "DRY this up"],
+  "required_tools": ["bash"],
+  "required_commands": [],
+  "supports_fix": false,
+  "timeout_seconds": 30
+}
