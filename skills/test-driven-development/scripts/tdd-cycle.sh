@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 TEST_FILE=""
 RUN_FLAG=""
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 # Parse arguments: position-independent flag handling
 for arg in "$@"; do

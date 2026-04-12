@@ -1,15 +1,10 @@
 #!/bin/bash
 set -e
 
-COMPONENT=""
-TYPE="cli"
-OUTPUT_DIR=""
-TMPFILE=""
-
-# Parse arguments
 COMPONENT="${1:-}"
 TYPE="${2:-cli}"
 OUTPUT_DIR="${3:-./src/ui}"
+TMPFILE=""
 
 cleanup() {
   [ -n "$TMPFILE" ] && rm -f "$TMPFILE"

@@ -67,7 +67,7 @@ if [ -z "$DRY_RUN" ]; then
 
   # Check changelog
   if [ -f "CHANGELOG.md" ]; then
-    if grep -Fq -- "$VERSION" CHANGELOG.md; then
+    if [ -n "$VERSION" ] && grep -Fq -- "$VERSION" CHANGELOG.md; then
       CHANGELOG_STATUS="pass"
       echo "[PREFLIGHT] ✅ CHANGELOG.md updated for $VERSION" >&2
     else
