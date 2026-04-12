@@ -1,0 +1,10 @@
+{
+  "name": "api-and-interface-design",
+  "category": "core",
+  "description": "Produces a typed, documented API contract before any implementation.",
+  "triggers": ["design the API", "what should the interface look like", "define the types", "API contract", "function signature"],
+  "required_tools": ["bash"],
+  "required_commands": [],
+  "supports_fix": false,
+  "timeout_seconds": 30
+}

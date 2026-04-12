@@ -2,7 +2,7 @@
 set -e
 
 GOAL="${1:-}"
-OUTPUT_FILE="${2:-/tmp/plan.md}"
+OUTPUT_FILE="${2:-./plan.md}"
 TMPFILE=""
 
 cleanup() {
@@ -54,4 +54,7 @@ mv "$TMPFILE" "$OUTPUT_FILE"
 echo "Plan written to $OUTPUT_FILE" >&2
 
 TASK_COUNT=$(grep -c '^\- \[ \]' "$OUTPUT_FILE" || true)
-echo "{\"goal\": \"$GOAL\", \"task_count\": $TASK_COUNT, \"plan_file\": \"$OUTPUT_FILE\"}"
+python3 -c "
+import json, sys
+print(json.dumps({'goal': sys.argv[1], 'task_count': int(sys.argv[2]), 'plan_file': sys.argv[3]}))
+" "$GOAL" "$TASK_COUNT" "$OUTPUT_FILE"

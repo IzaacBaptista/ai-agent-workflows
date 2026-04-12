@@ -1,0 +1,10 @@
+{
+  "name": "frontend-ui-engineering",
+  "category": "workflow-specific",
+  "description": "Guides structured UI or CLI output development with a component-first approach.",
+  "triggers": ["build UI", "add component", "style this", "improve output", "format the display", "terminal output"],
+  "required_tools": ["bash"],
+  "required_commands": [],
+  "supports_fix": false,
+  "timeout_seconds": 30
+}

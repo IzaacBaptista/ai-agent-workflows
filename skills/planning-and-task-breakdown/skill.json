@@ -1,0 +1,10 @@
+{
+  "name": "planning-and-task-breakdown",
+  "category": "core",
+  "description": "Produces a structured, prioritised task list from a high-level goal.",
+  "triggers": ["plan this", "break this down", "what are the steps", "estimate", "roadmap", "how should I approach"],
+  "required_tools": ["bash"],
+  "required_commands": [],
+  "supports_fix": false,
+  "timeout_seconds": 30
+}

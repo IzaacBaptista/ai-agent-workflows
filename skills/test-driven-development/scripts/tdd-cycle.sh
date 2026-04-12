@@ -1,15 +1,31 @@
 #!/bin/bash
 set -e
 
-TEST_FILE="${1:-}"
-RUN_FLAG="${2:-}"
+TEST_FILE=""
+RUN_FLAG=""
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+# Parse arguments: position-independent flag handling
+for arg in "$@"; do
+  case "$arg" in
+    --run) RUN_FLAG="--run" ;;
+    *)     [ -z "$TEST_FILE" ] && TEST_FILE="$arg" ;;
+  esac
+done
 
 echo "TDD cycle starting in: $PROJECT_ROOT" >&2
 
 if [ -z "$TEST_FILE" ]; then
   echo "[TDD] No test file specified — scaffolding generic test" >&2
   TEST_FILE="$PROJECT_ROOT/src/test/new-feature.test.ts"
+fi
+
+# Detect test command from package.json with fallback
+TEST_CMD="npm run test"
+if [ -f "$PROJECT_ROOT/package.json" ]; then
+  if python3 -c "import json; d=json.load(open('$PROJECT_ROOT/package.json')); exit(0 if 'test' in d.get('scripts',{}) else 1)" 2>/dev/null; then
+    TEST_CMD="npm run test"
+  fi
 fi
 
 PHASE="red"
@@ -41,13 +57,16 @@ fi
 
 echo "[TDD] Phase: RED" >&2
 echo "  → Test file: $TEST_FILE" >&2
-echo "  → Run: npm run test" >&2
+echo "  → Run: $TEST_CMD" >&2
 echo "[TDD] Expected result: at least one test FAILS before implementation" >&2
 
 if [ "$RUN_FLAG" = "--run" ]; then
   echo "Running test suite..." >&2
   cd "$PROJECT_ROOT"
-  npm run test 2>&1 || true
+  $TEST_CMD 2>&1 || true
 fi
 
-echo "{\"phase\": \"$PHASE\", \"test_file\": \"$TEST_FILE\", \"next_action\": \"$NEXT_ACTION\"}"
+python3 -c "
+import json, sys
+print(json.dumps({'phase': sys.argv[1], 'test_file': sys.argv[2], 'next_action': sys.argv[3]}))
+" "$PHASE" "$TEST_FILE" "$NEXT_ACTION"

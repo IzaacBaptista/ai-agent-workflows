@@ -1,18 +1,32 @@
 #!/bin/bash
 set -e
 
-TARGET="${1:-HEAD}"
-FIX_FLAG="${2:-}"
+TARGET="HEAD"
+FIX_FLAG=""
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-REPORT_FILE="/tmp/code-review.md"
-FINDINGS_FILE=$(mktemp)
+REPORT_FILE=""
+LINT_OUTPUT=""
+FINDINGS_FILE=""
 TMPFILE=""
 
+# Parse arguments: position-independent flag handling
+for arg in "$@"; do
+  case "$arg" in
+    --fix) FIX_FLAG="--fix" ;;
+    *)     TARGET="$arg" ;;
+  esac
+done
+
 cleanup() {
-  rm -f "$FINDINGS_FILE"
-  [ -n "$TMPFILE" ] && rm -f "$TMPFILE"
+  [ -n "$FINDINGS_FILE" ] && rm -f "$FINDINGS_FILE"
+  [ -n "$LINT_OUTPUT" ]   && rm -f "$LINT_OUTPUT"
+  [ -n "$TMPFILE" ]       && rm -f "$TMPFILE"
 }
 trap cleanup EXIT
+
+REPORT_FILE=$(mktemp)
+LINT_OUTPUT=$(mktemp)
+FINDINGS_FILE=$(mktemp)
 
 echo "Reviewing: $TARGET" >&2
 cd "$PROJECT_ROOT"
@@ -20,19 +34,42 @@ cd "$PROJECT_ROOT"
 ERRORS=0
 WARNINGS=0
 
-echo "[]" > "$FINDINGS_FILE"
+# Detect lint command with fallback
+LINT_CMD=""
+if [ -f "package.json" ]; then
+  if python3 -c "import json; d=json.load(open('package.json')); exit(0 if 'lint' in d.get('scripts',{}) else 1)" 2>/dev/null; then
+    LINT_CMD="npm run lint"
+  fi
+fi
 
-echo "Running TypeScript type check..." >&2
-if npm run lint 2>/tmp/lint-output.txt; then
-  echo "TypeScript: no errors" >&2
+if [ -n "$LINT_CMD" ]; then
+  echo "Running lint check: $LINT_CMD" >&2
+  if $LINT_CMD > "$LINT_OUTPUT" 2>&1; then
+    echo "Lint: no errors" >&2
+  else
+    ERRORS=$((ERRORS + 1))
+    echo "Lint errors found" >&2
+  fi
 else
-  ERRORS=$((ERRORS + 1))
-  echo "TypeScript errors found — see /tmp/lint-output.txt" >&2
+  echo "No lint script found in package.json — skipping" >&2
+  echo "(no lint command detected)" > "$LINT_OUTPUT"
 fi
 
 if [ "$FIX_FLAG" = "--fix" ] && [ -f "node_modules/.bin/eslint" ]; then
   echo "Running eslint --fix..." >&2
-  npx eslint --fix src/ 2>/dev/null || true
+  npx eslint --fix src/ >> "$LINT_OUTPUT" 2>&1 || true
+fi
+
+# Check for git diff if TARGET is not HEAD
+DIFF_STATS=""
+if [ "$TARGET" != "HEAD" ] && git rev-parse "$TARGET" > /dev/null 2>&1; then
+  DIFF_STATS=$(git --no-pager diff --stat "$TARGET" 2>/dev/null || echo "")
+  # Count potential issues from diff
+  ADDED_LINES=$(git --no-pager diff "$TARGET" 2>/dev/null | grep '^+' | grep -v '^+++' | wc -l || echo 0)
+  if [ "$ADDED_LINES" -gt 300 ]; then
+    WARNINGS=$((WARNINGS + 1))
+    echo "Warning: Large diff ($ADDED_LINES added lines)" >&2
+  fi
 fi
 
 TMPFILE=$(mktemp)
@@ -50,6 +87,10 @@ cat > "$TMPFILE" << REVIEWEOF
 | Errors   | $ERRORS |
 | Warnings | $WARNINGS |
 
+## Diff Stats
+
+${DIFF_STATS:-N/A}
+
 ## Checklist
 
 ### Correctness
@@ -59,7 +100,7 @@ cat > "$TMPFILE" << REVIEWEOF
 
 ### Types & Interfaces
 - [ ] All functions have explicit return types
-- [ ] No `any` types without justification
+- [ ] No \`any\` types without justification
 - [ ] Zod schemas validate external data
 
 ### Security
@@ -77,12 +118,20 @@ cat > "$TMPFILE" << REVIEWEOF
 - [ ] Edge cases are tested
 - [ ] Tests are independent and deterministic
 
-## TypeScript Output
+## Lint Output
 
-$(cat /tmp/lint-output.txt 2>/dev/null || echo "No lint output")
+$(cat "$LINT_OUTPUT" 2>/dev/null || echo "No lint output")
 REVIEWEOF
 
 mv "$TMPFILE" "$REPORT_FILE"
 echo "Review report written to $REPORT_FILE" >&2
 
-echo "{\"target\": \"$TARGET\", \"findings\": [], \"summary\": {\"errors\": $ERRORS, \"warnings\": $WARNINGS, \"info\": 0}, \"review_report\": \"$REPORT_FILE\"}"
+python3 -c "
+import json, sys
+print(json.dumps({
+  'target': sys.argv[1],
+  'findings': [],
+  'summary': {'errors': int(sys.argv[2]), 'warnings': int(sys.argv[3]), 'info': 0},
+  'review_report': sys.argv[4]
+}))
+" "$TARGET" "$ERRORS" "$WARNINGS" "$REPORT_FILE"

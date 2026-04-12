@@ -19,6 +19,9 @@ echo "Generating spec for: $FEATURE" >&2
 mkdir -p "$OUTPUT_DIR"
 
 SLUG=$(echo "$FEATURE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-' | cut -c1-60)
+if [ -z "$SLUG" ]; then
+  SLUG="spec-$(date -u +"%Y%m%d%H%M%S")"
+fi
 SPEC_FILE="$OUTPUT_DIR/${SLUG}.md"
 TMPFILE=$(mktemp)
 
@@ -61,4 +64,11 @@ SPECEOF
 mv "$TMPFILE" "$SPEC_FILE"
 echo "Spec written to $SPEC_FILE" >&2
 
-echo "{\"spec_path\": \"$SPEC_FILE\", \"feature\": \"$FEATURE\", \"sections\": [\"goal\",\"user_stories\",\"acceptance_criteria\",\"edge_cases\",\"out_of_scope\"]}"
+python3 -c "
+import json, sys
+print(json.dumps({
+  'spec_path': sys.argv[1],
+  'feature': sys.argv[2],
+  'sections': ['goal','user_stories','acceptance_criteria','edge_cases','out_of_scope']
+}))
+" "$SPEC_FILE" "$FEATURE"

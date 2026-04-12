@@ -1,0 +1,10 @@
+{
+  "name": "spec-driven-development",
+  "category": "core",
+  "description": "Produces a structured specification document before any implementation begins.",
+  "triggers": ["add feature", "implement", "build", "create new", "I want X to work", "new feature"],
+  "required_tools": ["bash"],
+  "required_commands": [],
+  "supports_fix": false,
+  "timeout_seconds": 30
+}

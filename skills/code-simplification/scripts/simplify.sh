@@ -1,10 +1,18 @@
 #!/bin/bash
 set -e
 
-TARGET="${1:-}"
-MODE="${2:-}"
-REPORT_FILE="/tmp/simplification-report.md"
+TARGET=""
+REPORT_ONLY=""
+REPORT_FILE=""
 TMPFILE=""
+
+# Parse arguments: position-independent flag handling
+for arg in "$@"; do
+  case "$arg" in
+    --report-only) REPORT_ONLY="yes" ;;
+    *)             [ -z "$TARGET" ] && TARGET="$arg" ;;
+  esac
+done
 
 cleanup() {
   [ -n "$TMPFILE" ] && rm -f "$TMPFILE"
@@ -22,18 +30,45 @@ if [ ! -e "$TARGET" ]; then
 fi
 
 echo "Analysing: $TARGET" >&2
+REPORT_FILE=$(mktemp)
 
-ISSUES="[]"
 ISSUE_COUNT=0
+ISSUES_JSON="[]"
+LONG_FUNCTION_NAMES=""
 
 if [ -f "$TARGET" ]; then
   LINE_COUNT=$(wc -l < "$TARGET")
-  LONG_FUNCTIONS=$(grep -n "^  [a-zA-Z].*{$\|^function \|^async function \|^  async " "$TARGET" 2>/dev/null | wc -l || echo 0)
 
   if [ "$LINE_COUNT" -gt 200 ]; then
     ISSUE_COUNT=$((ISSUE_COUNT + 1))
     echo "Warning: File has $LINE_COUNT lines (consider splitting)" >&2
+    LONG_FUNCTION_NAMES="$TARGET ($LINE_COUNT lines)"
   fi
+
+  # Find long functions (heuristic: function blocks > 50 lines)
+  FUNC_COUNT=$(grep -c "^  \(async \)\?[a-zA-Z].*{$\|^function \|^async function " "$TARGET" 2>/dev/null || echo 0)
+  if [ "$FUNC_COUNT" -gt 10 ]; then
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+    echo "Warning: File has $FUNC_COUNT function-like definitions" >&2
+  fi
+fi
+
+ISSUES_JSON=$(python3 -c "
+import json, sys
+issues = []
+target = sys.argv[1]
+long = sys.argv[2]
+if long:
+    issues.append({'type': 'long_file', 'name': target, 'suggestion': 'Split into smaller modules'})
+print(json.dumps(issues))
+" "$TARGET" "$LONG_FUNCTION_NAMES")
+ISSUE_COUNT=$(python3 -c "import json,sys; print(len(json.loads(sys.argv[1])))" "$ISSUES_JSON")
+
+FILE_STATS=""
+if [ -f "$TARGET" ]; then
+  FILE_STATS="$(wc -l < "$TARGET") lines"
+else
+  FILE_STATS=$(find "$TARGET" -name "*.ts" -exec wc -l {} + 2>/dev/null | tail -1 || echo "N/A")
 fi
 
 TMPFILE=$(mktemp)
@@ -71,10 +106,14 @@ cat > "$TMPFILE" << REPORTEOF
 
 ## File Stats
 
-$([ -f "$TARGET" ] && wc -l "$TARGET" || find "$TARGET" -name "*.ts" | xargs wc -l 2>/dev/null | tail -1)
+$FILE_STATS
 REPORTEOF
 
 mv "$TMPFILE" "$REPORT_FILE"
 echo "Simplification report written to $REPORT_FILE" >&2
 
-echo "{\"target\": \"$TARGET\", \"issues\": $ISSUES, \"issue_count\": $ISSUE_COUNT, \"report\": \"$REPORT_FILE\"}"
+python3 -c "
+import json, sys
+issues = json.loads(sys.argv[1])
+print(json.dumps({'target': sys.argv[2], 'issues': issues, 'issue_count': len(issues), 'report': sys.argv[3]}))
+" "$ISSUES_JSON" "$TARGET" "$REPORT_FILE"

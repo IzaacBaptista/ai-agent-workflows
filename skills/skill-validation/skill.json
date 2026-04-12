@@ -1,0 +1,10 @@
+{
+  "name": "skill-validation",
+  "category": "core",
+  "description": "Validates that a skill directory meets all structural and quality requirements before distribution.",
+  "triggers": ["validate this skill", "check my skill", "is this skill valid", "new skill", "skill structure"],
+  "required_tools": ["bash", "python3"],
+  "required_commands": [],
+  "supports_fix": false,
+  "timeout_seconds": 30
+}

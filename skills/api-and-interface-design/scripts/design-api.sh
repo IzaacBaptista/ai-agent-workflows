@@ -2,7 +2,7 @@
 set -e
 
 DESCRIPTION="${1:-}"
-OUTPUT_FILE="${2:-/tmp/api-contract.ts}"
+OUTPUT_FILE="${2:-./api-contract.ts}"
 TMPFILE=""
 
 cleanup() {
@@ -19,6 +19,9 @@ echo "Designing API contract for: $DESCRIPTION" >&2
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
 SLUG=$(echo "$DESCRIPTION" | sed 's/[^a-zA-Z0-9 ]//g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2)); print}' | tr -d ' ')
+if [ -z "$SLUG" ]; then
+  SLUG="Generated$(date -u +"%Y%m%d%H%M%S")"
+fi
 
 TMPFILE=$(mktemp)
 cat > "$TMPFILE" << CONTRACTEOF
@@ -98,4 +101,12 @@ CONTRACTEOF
 mv "$TMPFILE" "$OUTPUT_FILE"
 echo "API contract written to $OUTPUT_FILE" >&2
 
-echo "{\"description\": \"$DESCRIPTION\", \"output_file\": \"$OUTPUT_FILE\", \"interfaces\": [\"${SLUG}Input\",\"${SLUG}Options\",\"${SLUG}Result\",\"${SLUG}Data\",\"${SLUG}Error\",\"${SLUG}Fn\"]}"
+python3 -c "
+import json, sys
+slug = sys.argv[3]
+print(json.dumps({
+  'description': sys.argv[1],
+  'output_file': sys.argv[2],
+  'interfaces': [slug+'Input', slug+'Options', slug+'Result', slug+'Data', slug+'Error', slug+'Fn']
+}))
+" "$DESCRIPTION" "$OUTPUT_FILE" "$SLUG"

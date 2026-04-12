@@ -3,7 +3,7 @@ set -e
 
 SYMPTOM="${1:-}"
 LOG_FILE="${2:-}"
-REPORT_FILE="/tmp/debug-report.md"
+REPORT_FILE=""
 TMPFILE=""
 
 cleanup() {
@@ -16,6 +16,7 @@ if [ -z "$SYMPTOM" ]; then
   exit 1
 fi
 
+REPORT_FILE=$(mktemp)
 echo "Diagnosing: $SYMPTOM" >&2
 
 CATEGORY="unknown"
@@ -39,9 +40,11 @@ elif echo "$SYMPTOM" | grep -qi "permission\|EACCES\|EPERM"; then
 fi
 
 TMPFILE=$(mktemp)
-cat > "$TMPFILE" << REPORTEOF
+cat > "$TMPFILE" << 'REPORTEOF_MARKER'
 # Debug Report
+REPORTEOF_MARKER
 
+cat >> "$TMPFILE" << REPORTEOF
 **Symptom:** $SYMPTOM
 **Category:** $CATEGORY
 **Generated:** $(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -58,10 +61,6 @@ $HYPOTHESIS
 4. Run the test suite to confirm the fix does not regress other behaviour
 5. Add a regression test for the fixed scenario
 
-## Log Context
-
-$([ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ] && tail -50 "$LOG_FILE" || echo "No log file provided.")
-
 ## Fix Checklist
 
 - [ ] Root cause identified
@@ -70,7 +69,29 @@ $([ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ] && tail -50 "$LOG_FILE" || echo "No l
 - [ ] Full test suite passes
 REPORTEOF
 
+if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
+  echo "" >> "$TMPFILE"
+  echo "## Log Context" >> "$TMPFILE"
+  echo "" >> "$TMPFILE"
+  tail -50 "$LOG_FILE" >> "$TMPFILE"
+fi
+
 mv "$TMPFILE" "$REPORT_FILE"
 echo "Debug report written to $REPORT_FILE" >&2
 
-echo "{\"symptom\": \"$SYMPTOM\", \"category\": \"$CATEGORY\", \"hypothesis\": \"$HYPOTHESIS\", \"investigation_steps\": [\"Check call stack\",\"Add null guard\",\"Verify async ordering\"], \"debug_report\": \"$REPORT_FILE\"}"
+python3 -c "
+import json, sys
+
+symptom = sys.argv[1]
+category = sys.argv[2]
+hypothesis = sys.argv[3]
+report = sys.argv[4]
+
+print(json.dumps({
+  'symptom': symptom,
+  'category': category,
+  'hypothesis': hypothesis,
+  'investigation_steps': ['Check call stack', 'Add null guard', 'Verify async ordering'],
+  'debug_report': report
+}))
+" "$SYMPTOM" "$CATEGORY" "$HYPOTHESIS" "$REPORT_FILE"

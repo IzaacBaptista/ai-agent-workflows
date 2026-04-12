@@ -1,0 +1,10 @@
+{
+  "name": "code-review-and-quality",
+  "category": "core",
+  "description": "Performs a structured code review covering correctness, security, and test coverage.",
+  "triggers": ["review this code", "check quality", "review PR", "is this code good", "lint", "code smell"],
+  "required_tools": ["bash", "git"],
+  "required_commands": [],
+  "supports_fix": true,
+  "timeout_seconds": 120
+}

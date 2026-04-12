@@ -1,0 +1,10 @@
+{
+  "name": "debugging-and-error-recovery",
+  "category": "core",
+  "description": "Systematically diagnoses failures and produces a root-cause analysis with a fix plan.",
+  "triggers": ["fix this bug", "why is this failing", "debug", "error", "exception", "broken", "not working"],
+  "required_tools": ["bash"],
+  "required_commands": [],
+  "supports_fix": true,
+  "timeout_seconds": 60
+}

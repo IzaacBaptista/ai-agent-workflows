@@ -85,6 +85,39 @@ skills/
 - **Scripts**: `kebab-case.sh` (e.g., `deploy.sh`, `fetch-logs.sh`)
 - **Zip file**: Must match directory name exactly: `{skill-name}.zip`
 
+### `skill.json` Manifest (Required)
+
+Each skill must include a `skill.json` file with the following schema:
+
+```json
+{
+  "name": "skill-name",
+  "category": "core | workflow-specific",
+  "description": "One sentence description.",
+  "triggers": ["phrase 1", "phrase 2"],
+  "required_tools": ["bash", "git", "node", "python3"],
+  "required_commands": ["npm run test"],
+  "supports_fix": false,
+  "timeout_seconds": 30
+}
+```
+
+**Fields:**
+- `name` — Must match the directory name exactly
+- `category` — `core` for universal skills, `workflow-specific` for opinionated/repo-specific skills
+- `triggers` — Phrases that should activate this skill
+- `required_tools` — External binaries required (used for environment validation)
+- `required_commands` — npm/project scripts required (validated at runtime)
+- `supports_fix` — Whether the skill's script can auto-apply fixes (`--fix` flag)
+- `timeout_seconds` — Expected maximum execution time
+
+### Skill Categories
+
+Skills are organised into two categories:
+
+- **core** — Universal skills applicable to any software engineering project (spec, plan, debug, review, test, simplify, api design, shipping, validation)
+- **workflow-specific** — Opinionated skills tied to this repository's engineering conventions (incremental implementation, UI engineering)
+
 ### SKILL.md Format
 
 ```markdown
