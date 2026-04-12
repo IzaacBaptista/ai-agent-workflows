@@ -37,7 +37,7 @@ WARNINGS=0
 # Detect lint command with fallback
 LINT_CMD=""
 if [ -f "package.json" ]; then
-  if python3 -c "import json; d=json.load(open('package.json')); exit(0 if 'lint' in d.get('scripts',{}) else 1)" 2>/dev/null; then
+  if node -e "const d=require('./package.json'); process.exit('lint' in (d.scripts||{}) ? 0 : 1)" 2>/dev/null; then
     LINT_CMD="npm run lint"
   fi
 fi

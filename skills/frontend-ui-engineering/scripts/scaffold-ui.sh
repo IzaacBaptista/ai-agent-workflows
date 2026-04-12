@@ -16,7 +16,10 @@ if [ -z "$COMPONENT" ]; then
   exit 1
 fi
 
-# Sanitize COMPONENT to valid PascalCase identifier
+# Sanitize COMPONENT to valid PascalCase identifier:
+# 1. Replace non-alphanumeric chars with spaces
+# 2. Capitalize first letter of each word (awk title-case)
+# 3. Remove spaces to produce PascalCase
 COMPONENT_ID=$(echo "$COMPONENT" | sed 's/[^a-zA-Z0-9]/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2); print}' | tr -d ' ')
 if [ -z "$COMPONENT_ID" ]; then
   echo "Error: component name '$COMPONENT' produces an empty identifier" >&2

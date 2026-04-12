@@ -45,7 +45,9 @@ if [ -f "$TARGET" ]; then
     LONG_FUNCTION_NAMES="$TARGET ($LINE_COUNT lines)"
   fi
 
-  # Find long functions (heuristic: function blocks > 50 lines)
+  # Heuristic for function count: matches common TypeScript/JS patterns
+  # (class methods, top-level functions, async functions)
+  # Note: does not match arrow functions; adjust pattern for your codebase style
   FUNC_COUNT=$(grep -c "^  \(async \)\?[a-zA-Z].*{$\|^function \|^async function " "$TARGET" 2>/dev/null || echo 0)
   if [ "$FUNC_COUNT" -gt 10 ]; then
     ISSUE_COUNT=$((ISSUE_COUNT + 1))

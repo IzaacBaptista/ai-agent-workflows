@@ -29,7 +29,7 @@ READY=true
 # Detect test command from package.json with fallback
 TEST_CMD=""
 if [ -f "package.json" ]; then
-  if python3 -c "import json; d=json.load(open('package.json')); exit(0 if 'test' in d.get('scripts',{}) else 1)" 2>/dev/null; then
+  if node -e "const d=require('./package.json'); process.exit('test' in (d.scripts||{}) ? 0 : 1)" 2>/dev/null; then
     TEST_CMD="npm run test"
   fi
 fi

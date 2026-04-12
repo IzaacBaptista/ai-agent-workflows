@@ -23,7 +23,7 @@ fi
 # Detect test command from package.json with fallback
 TEST_CMD="npm run test"
 if [ -f "$PROJECT_ROOT/package.json" ]; then
-  if python3 -c "import json; d=json.load(open('$PROJECT_ROOT/package.json')); exit(0 if 'test' in d.get('scripts',{}) else 1)" 2>/dev/null; then
+  if node -e "const d=require('$PROJECT_ROOT/package.json'); process.exit('test' in (d.scripts||{}) ? 0 : 1)" 2>/dev/null; then
     TEST_CMD="npm run test"
   fi
 fi
