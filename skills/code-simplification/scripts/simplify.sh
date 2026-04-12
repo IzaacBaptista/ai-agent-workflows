@@ -53,18 +53,17 @@ if [ -f "$TARGET" ]; then
   fi
 fi
 
-_simplify_output=$(python3 -c "
+_simplify_result=$(python3 -c "
 import json, sys
 issues = []
 target = sys.argv[1]
 long = sys.argv[2]
 if long:
     issues.append({'type': 'long_file', 'name': target, 'suggestion': 'Split into smaller modules'})
-print(len(issues))
-print(json.dumps(issues))
+print(json.dumps({'issue_count': len(issues), 'issues': issues}))
 " "$TARGET" "$LONG_FUNCTION_NAMES")
-ISSUE_COUNT=$(echo "$_simplify_output" | head -1)
-ISSUES_JSON=$(echo "$_simplify_output" | tail -1)
+ISSUE_COUNT=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['issue_count'])" "$_simplify_result")
+ISSUES_JSON=$(python3 -c "import json,sys; print(json.dumps(json.loads(sys.argv[1])['issues']))" "$_simplify_result")
 
 FILE_STATS=""
 if [ -f "$TARGET" ]; then

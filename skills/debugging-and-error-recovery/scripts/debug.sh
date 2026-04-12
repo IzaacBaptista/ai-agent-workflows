@@ -40,11 +40,9 @@ elif echo "$SYMPTOM" | grep -qi "permission\|EACCES\|EPERM"; then
 fi
 
 TMPFILE=$(mktemp)
-cat > "$TMPFILE" << 'REPORTEOF_MARKER'
+cat > "$TMPFILE" << REPORTEOF
 # Debug Report
-REPORTEOF_MARKER
 
-cat >> "$TMPFILE" << REPORTEOF
 **Symptom:** $SYMPTOM
 **Category:** $CATEGORY
 **Generated:** $(date -u +"%Y-%m-%dT%H:%M:%SZ")
