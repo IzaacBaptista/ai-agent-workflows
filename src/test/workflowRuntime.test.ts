@@ -12,6 +12,7 @@ import {
   WorkflowDefinition,
   WorkflowExecutionState,
   WorkflowRuntime,
+  setRuntimeSleepForTesting,
 } from "../core/workflowRuntime";
 import {
   setCodePatchApplierForTesting,
@@ -222,42 +223,54 @@ test("WorkflowRuntime retries failed step once when configured", async () => {
   assert.equal(runtime.getRunRecord().steps.length, 2);
 });
 
-test("WorkflowRuntime does not retry a step after callLLM exhausts provider retries", async () => {
-  const runtime = new WorkflowRuntime({
-    workflowName: "ProviderFailureWorkflow",
-    input: "provider failure input",
-    policy: {
-      maxSteps: 5,
-      maxRetriesPerStep: 1,
-      timeoutMs: 1000,
-    },
+test("WorkflowRuntime retries a step on rate-limit error and sleeps for retryAfterMs", async () => {
+  const sleepCalls: number[] = [];
+  setRuntimeSleepForTesting(async (ms) => {
+    sleepCalls.push(ms);
   });
 
-  let attemptCount = 0;
+  try {
+    const runtime = new WorkflowRuntime({
+      workflowName: "ProviderFailureWorkflow",
+      input: "provider failure input",
+      policy: {
+        maxSteps: 5,
+        maxRetriesPerStep: 1,
+        timeoutMs: 1000,
+      },
+    });
 
-  await assert.rejects(
-    () =>
-      runtime.executeStep(
-        "plan",
-        async () => {
-          attemptCount += 1;
-          throw new LlmProviderError(
-            "rate_limit",
-            "LLM provider rate limit reached. Retry after approximately 3s.",
-            { retryAfterMs: 3000 },
-          );
-        },
-        {
-          agentName: "PlannerAgent",
-          inputSummary: "provider-limited planning",
-        },
-      ),
-    /rate limit reached/i,
-  );
+    let attemptCount = 0;
 
-  assert.equal(attemptCount, 1);
-  assert.equal(runtime.getRunRecord().steps.length, 1);
-  assert.equal(runtime.getRunRecord().steps[0]?.attempt, 1);
+    await assert.rejects(
+      () =>
+        runtime.executeStep(
+          "plan",
+          async () => {
+            attemptCount += 1;
+            throw new LlmProviderError(
+              "rate_limit",
+              "LLM provider rate limit reached. Retry after approximately 3s.",
+              { retryAfterMs: 3000 },
+            );
+          },
+          {
+            agentName: "PlannerAgent",
+            inputSummary: "provider-limited planning",
+          },
+        ),
+      /rate limit reached/i,
+    );
+
+    assert.equal(attemptCount, 2);
+    assert.equal(sleepCalls.length, 1);
+    assert.equal(sleepCalls[0], 3000);
+    assert.equal(runtime.getRunRecord().steps.length, 2);
+    assert.equal(runtime.getRunRecord().steps[0]?.attempt, 1);
+    assert.equal(runtime.getRunRecord().steps[1]?.attempt, 2);
+  } finally {
+    setRuntimeSleepForTesting();
+  }
 });
 
 test("WorkflowRuntime fails timed out step and records failure", async () => {
