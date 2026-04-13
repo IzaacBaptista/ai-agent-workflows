@@ -13,6 +13,8 @@ import { setRunCommandExecutorForTesting } from "../tools/runCommandTool";
 import { runBugWorkflow } from "../workflows/bugWorkflow";
 import { runIssueWorkflow } from "../workflows/issueWorkflow";
 import { runPRReviewWorkflow } from "../workflows/prReviewWorkflow";
+import { runJiraAnalyzeWorkflow } from "../workflows/jiraAnalyzeWorkflow";
+import { setJiraIssueFetcherForTesting } from "../integrations/jira/fetchJiraIssue";
 
 type MockResponsePayload = Record<string, unknown>;
 
@@ -1433,5 +1435,198 @@ test("runPRReviewWorkflow critic guidance can redirect to run_command when execu
   } finally {
     setRunCommandExecutorForTesting();
     (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+  }
+});
+
+// ─── runJiraAnalyzeWorkflow (simple mode) ─────────────────────────────────────
+
+const MOCK_JIRA_ISSUE = {
+  key: "REL-1",
+  summary: "Add rate limiting",
+  description: "Protect the API with rate limiting.",
+  issueType: "Story",
+  status: "In Progress",
+  priority: "High",
+  labels: [],
+  components: [],
+  url: "https://jira.example.com/browse/REL-1",
+};
+
+const JIRA_TRIAGE_RESPONSE = {
+  summary: "Rate limiting story triage",
+  investigationAreas: ["src/middleware"],
+  codeSearchTerms: ["rateLimiter"],
+  validationChecks: ["confirm rate limit applied"],
+};
+
+const JIRA_ANALYZE_RESPONSE = {
+  summary: "Implement rate limiting middleware",
+  implementationPlan: ["Add rateLimiter.ts", "Wire middleware in app.ts"],
+  acceptanceCriteria: ["429 returned after limit exceeded"],
+  risks: ["Performance overhead"],
+  testScenarios: ["Call endpoint 101 times"],
+  suggestedBranchName: "feat/rate-limiting",
+  suggestedPRTitle: "feat: add rate limiting middleware",
+};
+
+test("runJiraAnalyzeWorkflow simple mode returns JiraAnalysis with 2 LLM calls", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  let callCount = 0;
+  const responses = [
+    { output_text: JSON.stringify(JIRA_TRIAGE_RESPONSE) },
+    { output_text: JSON.stringify(JIRA_ANALYZE_RESPONSE) },
+  ];
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const res = responses[callCount++];
+    if (!res) throw new Error(`Unexpected extra LLM call #${callCount}`);
+    return res;
+  };
+
+  setJiraIssueFetcherForTesting(async () => MOCK_JIRA_ISSUE);
+  setGitToolExecutorForTesting({
+    getStatus: async () => ({ entries: [], raw: "" }),
+    getDiff: async () => ({ staged: false, diff: "", changedFiles: [], truncated: false }),
+    getLog: async () => ({ commits: [], truncated: false }),
+  });
+
+  try {
+    const result = await runJiraAnalyzeWorkflow("REL-1");
+
+    assert.equal(result.success, true);
+    if (!result.success) return;
+
+    assert.equal(callCount, 2, "simple mode should make exactly 2 LLM calls");
+    assert.equal(result.data.summary, JIRA_ANALYZE_RESPONSE.summary);
+    assert.deepEqual(result.data.implementationPlan, JIRA_ANALYZE_RESPONSE.implementationPlan);
+    assert.equal(result.data.suggestedBranchName, JIRA_ANALYZE_RESPONSE.suggestedBranchName);
+    assert.equal(result.meta.jiraIssueKey, "REL-1");
+    assert.equal(result.meta.workflowName, "JiraAnalyzeWorkflow");
+
+    // Simple mode: exactly triage + finalize steps — no planner / critic steps
+    const runRecord = getRunMemory(result.meta.runId);
+    const stepNames = runRecord.steps.map((s) => s.name);
+    assert.ok(stepNames.includes("analyze"), "should have analyze step");
+    assert.ok(stepNames.includes("finalize"), "should have finalize step");
+    assert.ok(!stepNames.includes("plan"), "should NOT have plan step in simple mode");
+    assert.ok(!stepNames.includes("critique"), "should NOT have critique step in simple mode");
+    assert.ok(!stepNames.includes("replan"), "should NOT have replan step in simple mode");
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+    setJiraIssueFetcherForTesting();
+    setGitToolExecutorForTesting();
+  }
+});
+
+test("runJiraAnalyzeWorkflow simple mode saves triage context artifacts", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  const responses = [
+    { output_text: JSON.stringify(JIRA_TRIAGE_RESPONSE) },
+    { output_text: JSON.stringify(JIRA_ANALYZE_RESPONSE) },
+  ];
+  let callCount = 0;
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => responses[callCount++]!;
+
+  setJiraIssueFetcherForTesting(async () => MOCK_JIRA_ISSUE);
+  setGitToolExecutorForTesting({
+    getStatus: async () => ({ entries: [], raw: "" }),
+    getDiff: async () => ({ staged: false, diff: "", changedFiles: [], truncated: false }),
+    getLog: async () => ({ commits: [], truncated: false }),
+  });
+
+  try {
+    const result = await runJiraAnalyzeWorkflow("REL-1");
+    assert.equal(result.success, true);
+    if (!result.success) return;
+
+    const runRecord = getRunMemory(result.meta.runId);
+    assert.ok(runRecord.artifacts.triage, "triage artifact should be saved");
+    assert.ok(runRecord.artifacts.codeSearchResults !== undefined, "codeSearchResults artifact should be saved");
+    assert.ok(runRecord.artifacts.gitStatusResult !== undefined, "gitStatusResult artifact should be saved");
+    assert.ok(runRecord.artifacts.gitLogResult !== undefined, "gitLogResult artifact should be saved");
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+    setJiraIssueFetcherForTesting();
+    setGitToolExecutorForTesting();
+  }
+});
+
+test("runJiraAnalyzeWorkflow returns failure when Jira fetch fails", async () => {
+  setJiraIssueFetcherForTesting(async () => {
+    throw new Error("Jira API unavailable");
+  });
+
+  try {
+    const result = await runJiraAnalyzeWorkflow("REL-404");
+
+    assert.equal(result.success, false);
+    if (result.success) return;
+    assert.match(result.error, /Jira API unavailable/);
+    assert.equal(result.meta.workflowName, "JiraAnalyzeWorkflow");
+  } finally {
+    setJiraIssueFetcherForTesting();
+  }
+});
+
+test("runJiraAnalyzeWorkflow agentic mode invokes planner", async () => {
+  const originalCallLlm = llmClient.callLLM;
+  let callCount = 0;
+
+  // agentic mode: planner → triage → replanner → finalize → critique
+  const responses = [
+    {
+      output_text: JSON.stringify({
+        summary: "agentic plan",
+        actions: [
+          { type: "analyze", stage: "triage", task: "triage task", reason: "triage first" },
+          { type: "finalize", task: "finalize task", reason: "done" },
+        ],
+      }),
+    },
+    { output_text: JSON.stringify(JIRA_TRIAGE_RESPONSE) },
+    {
+      output_text: JSON.stringify({
+        summary: "replan after triage",
+        actions: [{ type: "finalize", task: "finalize task", reason: "done" }],
+      }),
+    },
+    { output_text: JSON.stringify(JIRA_ANALYZE_RESPONSE) },
+    {
+      output_text: JSON.stringify({
+        approved: true,
+        summary: "looks good",
+        missingEvidence: [],
+        confidence: "high",
+      }),
+    },
+  ];
+
+  (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = async () => {
+    const res = responses[callCount++];
+    if (!res) throw new Error(`Unexpected extra LLM call #${callCount}`);
+    return res;
+  };
+
+  setJiraIssueFetcherForTesting(async () => MOCK_JIRA_ISSUE);
+  setGitToolExecutorForTesting({
+    getStatus: async () => ({ entries: [], raw: "" }),
+    getDiff: async () => ({ staged: false, diff: "", changedFiles: [], truncated: false }),
+    getLog: async () => ({ commits: [], truncated: false }),
+  });
+
+  try {
+    const result = await runJiraAnalyzeWorkflow("REL-1", { agentic: true });
+
+    assert.equal(result.success, true);
+    if (!result.success) return;
+
+    assert.ok(callCount > 2, "agentic mode should make more than 2 LLM calls");
+
+    const runRecord = getRunMemory(result.meta.runId);
+    const stepNames = runRecord.steps.map((s) => s.name);
+    assert.ok(stepNames.includes("plan"), "agentic mode should have a plan step");
+  } finally {
+    (llmClient as { callLLM: typeof llmClient.callLLM }).callLLM = originalCallLlm;
+    setJiraIssueFetcherForTesting();
+    setGitToolExecutorForTesting();
   }
 });

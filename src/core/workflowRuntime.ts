@@ -1632,6 +1632,56 @@ export class WorkflowRuntime {
     return state.result;
   }
 
+  async runSimple<TTriage, TResult>(
+    definition: WorkflowDefinition<TTriage, TResult>,
+    input: string,
+    task: string,
+    collectContext?: (triage: TTriage, runtime: WorkflowRuntime) => Promise<void>,
+  ): Promise<TResult> {
+    const triage = await this.executeStep(
+      "analyze",
+      () => definition.runTriage(task, input),
+      {
+        agentName: definition.triageAgentName,
+        inputSummary: task,
+        outputSummary: (value) =>
+          definition.summarizeTriage?.(value as TTriage) ?? summarizeValue(value),
+        actionType: "analyze",
+        signature: `triage:${task.trim().toLowerCase()}`,
+      },
+    );
+    this.saveArtifact("triage", triage);
+
+    if (collectContext) {
+      await collectContext(triage, this);
+    }
+
+    const finalContext = [
+      definition.buildFinalContext(input, this, triage),
+      "",
+      "Final task:",
+      task,
+    ].join("\n");
+    this.saveArtifact("context", finalContext);
+
+    const result = await this.executeStep(
+      "finalize",
+      () => definition.runFinal(task, finalContext),
+      {
+        agentName: definition.finalAgentName,
+        inputSummary: task,
+        outputSummary: (value) =>
+          definition.summarizeResult?.(value as TResult) ?? summarizeValue(value),
+        actionType: "finalize",
+        signature: `finalize:${task.trim().toLowerCase()}`,
+        reservedBudgetStep: true,
+      },
+    );
+    this.saveArtifact("result", result);
+
+    return result;
+  }
+
   complete(): WorkflowRunRecord {
     return completeRun(this.runId);
   }

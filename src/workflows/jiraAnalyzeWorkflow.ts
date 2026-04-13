@@ -37,6 +37,11 @@ import {
   startAgentExecution,
 } from "../tools/loggingTool";
 import { buildLlmPreflightFailure } from "./workflowPreflight";
+import { collectTriageContext } from "./contextCollector";
+
+export interface JiraAnalyzeOptions {
+  agentic?: boolean;
+}
 
 function buildJiraAnalyzeWorkflowContext(
   input: string,
@@ -182,8 +187,12 @@ const jiraAnalyzeWorkflowDefinition: WorkflowDefinition<IssueTriage, JiraAnalysi
   summarizeResult: (result) => `implementationPlan=${result.implementationPlan.length}`,
 };
 
+const JIRA_ANALYZE_TASK =
+  "Analyze the Jira issue and produce a detailed implementation plan with suggested branch and PR title";
+
 export async function runJiraAnalyzeWorkflow(
   issueKey: string,
+  options: JiraAnalyzeOptions = {},
 ): Promise<WorkflowResult<JiraAnalysis>> {
   const preflightFailure = buildLlmPreflightFailure<JiraAnalysis>(
     "JiraAnalyzeWorkflow",
@@ -194,11 +203,36 @@ export async function runJiraAnalyzeWorkflow(
     return preflightFailure;
   }
 
-  const issue = await fetchJiraIssue(issueKey, {
-    baseUrl: env.JIRA_BASE_URL,
-    email: env.JIRA_EMAIL,
-    apiToken: env.JIRA_API_TOKEN,
-  });
+  let issue;
+  try {
+    issue = await fetchJiraIssue(issueKey, {
+      baseUrl: env.JIRA_BASE_URL,
+      email: env.JIRA_EMAIL,
+      apiToken: env.JIRA_API_TOKEN,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[JiraAnalyzeWorkflow] Failed to fetch Jira issue:", message);
+    return {
+      success: false,
+      error: message,
+      meta: {
+        runId: "",
+        workflowName: "JiraAnalyzeWorkflow",
+        status: "failed",
+        stepCount: 0,
+        critiqueCount: 0,
+        replanCount: 0,
+        toolCallCount: 0,
+        editActionCount: 0,
+        delegationCount: 0,
+        maxDelegationDepthReached: 0,
+        memoryHits: 0,
+        criticRedirectCount: 0,
+        jiraIssueKey: issueKey,
+      },
+    };
+  }
 
   const input = formatJiraIssue(issue);
 
@@ -209,7 +243,25 @@ export async function runJiraAnalyzeWorkflow(
   });
 
   try {
-    const result = await runtime.runActionQueue(jiraAnalyzeWorkflowDefinition, input);
+    let result: JiraAnalysis;
+
+    if (options.agentic) {
+      result = await runtime.runActionQueue(jiraAnalyzeWorkflowDefinition, input);
+    } else {
+      result = await runtime.runSimple(
+        jiraAnalyzeWorkflowDefinition,
+        input,
+        JIRA_ANALYZE_TASK,
+        async (triage, rt) => {
+          const context = await collectTriageContext(triage);
+          rt.saveArtifact("codeSearchResults", context.codeSearchResults);
+          rt.saveArtifact("fileReadResults", context.fileReadResults);
+          rt.saveArtifact("gitStatusResult", context.gitStatus);
+          rt.saveArtifact("gitLogResult", context.gitLog);
+        },
+      );
+    }
+
     runtime.complete();
     logAgentExecutionSuccess(execution, input, result);
     return {
